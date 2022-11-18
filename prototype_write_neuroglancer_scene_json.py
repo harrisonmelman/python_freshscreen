@@ -1,5 +1,5 @@
 # docstring convention example:
-# like git commit rules. one line short description, skip a line, then more descriptive 
+# like git commit rules. one line short description, skip a line, then more descriptive
 
 #def complex(real=0.0, imag=0.0):
 """Form a complex number.
@@ -27,7 +27,7 @@ import functools
 # header = nrrd.read_header('output.nrrd') # possible to only read the nrrd header
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
-# needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information 
+# needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
 # example usage:
     # n5_filepath="{}/{}/{}.format(N5_PREFIX, filename, N5_SUFFIX)"
     # precomputed_filepath="{}/{}.format(PRECOMPUTED_PREFIX, filename)"
@@ -71,7 +71,7 @@ def get_contrast_from_filename(filename: str):
 
 def get_default_threshold(filename: str):
     """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
-    
+
     Completely dependendent on current (11/7/2022) freshscreen filenames"""
     DEFAULT_THRESHOLDS = {
         "dwi" : 25000,
@@ -112,16 +112,16 @@ def write_dict_to_json_file(file: str, data: dict):
         # i THINK that ensure_ascii=False is analogous to python2's encoding='utf-8'
         # json cannot handle numpy data types so i must define my own encoder
         # TODO: encoder stolen from stack overflow. ensure that it works
-        # dump writes to file. dumps writes to a string. 
+        # dump writes to file. dumps writes to a string.
         # any other differences? idk
         json.dump(data, f, ensure_ascii=False, cls=NpEncoder)
 
 def convert_json_to_url(file: str):
     """file is the path to a json file that contains scene information for neuroglancer
     Returns a shareable neuroglancer link: "neuroglancer.freshscreen.com/#!{}".format(encoded_json)
-    
+
     you can also pass a JSON in string format and it will handle that instead. this function can tell if it is a filepath or a json string"""
-    
+
     encoded_text = ""
     # might be more accurate to check if the first character is {, but that leaves room for extra whitespace to break me
     if "{" in file:
@@ -156,7 +156,7 @@ def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
 
 def get_s3_url_from_file_basename(filename: str):
     """given a file basename (e.g. 200316-1-1_N10_N58204NLSAM_fa.n5), return the full url (in neuroglancer format) of that file on the d3mof5o s3 bucket
-    
+
     This function determines if the file is of type n5 or precomputed, and builds the path accordingly"""
     # TODO: add an argument to make this work for arbitrary s3 buckets
     # TODO: test to ensure that os.path.join always does the right job here. PROBABLY fails on windows
@@ -207,9 +207,9 @@ def setup_layer():
     pass
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
-# TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden 
+# TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
 # TODO: color images are currently ignored
-def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str, label_nhdr_file: str, output_file: str,  json_template: str="/Users/harry/scratch/neuroglancer_python_prototype/data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
+def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str, label_nhdr_file: str, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
 
     inputs:
@@ -217,7 +217,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     label_file -- name of the root folder of label file, as it sits on S3
     data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
     label_nhdr -- analogous to data_nhdr for label_file
-    output_file -- the freshscreen display json file to eventually write to. 
+    output_file -- the freshscreen display json file to eventually write to.
     json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
         - current template was copied from N58204NLSAM_dwi
     data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
@@ -238,7 +238,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         1) the contrast of interest
             different for each contrast
             need to update:
-                 filepath 
+                 filepath
                  contrast window/range
                  transform matrix
                  input/output dimensions (out_dims should always be MRI resolution)
@@ -250,7 +250,15 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
             one for each SPECIMEN. should be the same parameters for all (except origin transform)
         3) orientation label
             will always be the same file. placement might be a pain"""
-    
+
+    # check if json_template is relative or abspath and handle it accordingly
+    if not os.path.isabs(json_template):
+        dirname = os.path.dirname(os.path.realpath(__file__))
+        json_template = os.path.join(dirname, json_template)
+        print(dirname)
+    print(json_template)
+    exit()
+
     # .lower() converts string to all lowercase
     if "color" in get_contrast_from_filename(data_file).lower():
         logging.warning("Color files are not currently supported. Make this one manually.")
@@ -267,7 +275,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         return None
 
     ###**************####
-    # edit image layer 
+    # edit image layer
     ###**************####
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
@@ -296,7 +304,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
         i+=1
     logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-    
+
     # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
     # TODO: this is almost identical to above 6 lines. functionize?
         # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
@@ -321,7 +329,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
 
     ###**************####
-    # edit rCCF label layer 
+    # edit rCCF label layer
     ###**************####
     # TODO: add more functions. this looks almost identical to code above
     # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
@@ -335,7 +343,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
         i+=1
     logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
-    
+
     label_nhdr = nrrd.read_header(label_nhdr_file)
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
     i = 0
@@ -381,7 +389,7 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
         - filename in freshscreen s3
         - display name
         - neuroglancer url
-        
+
     create a dict, convert to json, write to file"""
     organization_json = dict()
     organization_json["object_Name"] = data_file
@@ -402,11 +410,33 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
 # TODO: boto3 is an aws sdk for python. but it is confusing
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_file: str=None):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
-    from subprocess import run
+    import subprocess
+    rclone = "K:/DevApps/rclone-v1.58.1-windows-amd64/rclone.exe"
 
     spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
-    cmd_str="rclone lsd freshscreen:d3mof5o | grep {} | awk '{{print $5}}'".format(spec_id_fresh)
-    a=run(cmd_str, shell=True,capture_output=True)
+    # on windows i had to split this up because pipes are playing funny (read: not working). do not fully understand why.
+    # TODO: test this doesn't break everything on mac
+    # i think that i need to do with open... several times because i am usig the command line to read from the file (with grep and awk). python having the file open locks it from other prying eyes. there MIGHT(??) be a work around to this
+    # this is the full command as you would run it on the command line
+    # TODO: also, subprocess.run takes stdin as an argument. i am supposed to be able to pass a file handle to it, but that isn't working. that might be mroe reliable then what i am currently doing+
+    #cmd_str="{} lsd freshscreen:d3mof5o | grep {} | awk '{{print $5}}'".format(rclone, spec_id_fresh)
+
+    cmd_str="{} lsd freshscreen:d3mof5o".format(rclone)
+    a=subprocess.run(cmd_str, shell=True, capture_output=True)
+    temp_file_list = "K:/workstation/code/display/python_freshscreen/data/temp/subprocess_output"
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+    cmd_str = "grep {} {}".format(spec_id_fresh, temp_file_list)
+    a=subprocess.run(cmd_str, capture_output=True)
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+    cmd_str = "awk '{{print $5}}' {}".format(temp_file_list)
+    a=subprocess.run(cmd_str, capture_output=True)
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
     filelist = a.stdout.decode("utf-8").split("\n")
     if label_file is None:
         # if user does not provide label file, loop through s3 bucket to try and find it. returns if cannot find
@@ -435,7 +465,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
         data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(runno, contrast))
         if not os.path.isfile(data_nhdr):
             data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast))
-        # TODO: make next line more extensible. it needs a "find" feature to handle cases when filename looks liie $runno_RCCF_MC_labels instead of the canonical 
+        # TODO: make next line more extensible. it needs a "find" feature to handle cases when filename looks liie $runno_RCCF_MC_labels instead of the canonical
         label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "{}_RCCF_labels.nhdr".format(runno))
         if not os.path.isfile(label_nhdr):
             label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "{}_RCCF_MC_labels.nhdr".format(runno))
@@ -447,7 +477,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
             # lightsheet volumes are saved locally with spec id instead of runno in the filename
             # TODO: clarify between freshscreen and CIVM specimen id's (i.e. difference between 190415-2_1 and 190415-2-1)
             print("contrast is: {}".format(contrast))
-            if contrast in "mGRE": 
+            if contrast in "mGRE":
                 contrast = "mAVG"
             data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast))
 
@@ -465,10 +495,12 @@ if len(sys.argv) > 1:
     project_code = sys.argv[1]
     specimen_id = sys.argv[2]
     output_dir = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
-    NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
+    # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
+    #NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
+    NHDR_DIR = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
     loop_through_specimen_in_freshscreen(specimen_id, output_dir)
-
-
+else:
+    logging.warning("Not enough input arguments. Requires project_code and specimen_id as positional arguments")
 
 
 exit()
@@ -494,7 +526,7 @@ label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhd
 
 
 # for now, min/max should be defined by a  dict of default values
-# make default be user's input, if none are given, yell at user and use default dict 
+# make default be user's input, if none are given, yell at user and use default dict
 #write_three_layer_json(data_file,label_file, data_nhdr, label_nhdr, data_threshold_max=None)
 specimen_id = "190415-2_1"
 output_dir_default = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
