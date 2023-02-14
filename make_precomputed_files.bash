@@ -15,4 +15,4 @@ in_file="/Volumes/PWP-CIVM-CTX01/${project_code}/${spec_id}/Aligned-Data/labels/
 out_file="/Users/harry/scratch/neuroglancer_python_prototype/data/${spec_id_fresh}_${runno}_RCCF_labels.precomputed"
 python prototype_make_precomputed_file.py ${in_file} ${out_file}
 
-# TODO: let the above script (which handles naming, so it has the full precomputed filename) handle uploading to s3. It can then auto-start the script to make scene jsons, and auto-upload them too. 
+# TODO: let the above script (which handles naming, so it has the full precomputed filename) handle uploading to s3. It can then auto-start the script to make scene jsons, and auto-upload them too.

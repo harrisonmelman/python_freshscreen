@@ -66,7 +66,7 @@ def make_precomputed(nhdr_file: str, out_file: str):
 	#vol = CloudVolume('s3://d3mof5o/TESTING_N58204NLSAM_RCCF_labels.precomputed', info=info)
 	#vol = CloudVolume('file://{}/N57205NLSAM_RCCF_labels.precomputed'.format(data_dir), info=info)
 	vol = CloudVolume('file://{}'.format(out_file), info=info)
-	
+
 
 	# info (dict, rw) - Python dict representation of Neuroglancer info JSON file. You must call vol.commit_info() to save your changes to storage.
 	vol.commit_info()
@@ -102,7 +102,7 @@ class NpEncoder(json.JSONEncoder):
         return super(NpEncoder, self).default(obj)
 
 def add_lookup_table(precomputed_file: str, lookup_table_template: str):
-	# lookup table will always be the same. 
+	# lookup table will always be the same.
 	src = lookup_table_template
 	dst_dir = os.path.join(precomputed_file, "segment_properties")
 	dst = os.path.join(dst_dir, "info")
@@ -110,7 +110,7 @@ def add_lookup_table(precomputed_file: str, lookup_table_template: str):
 		os.makedirs(dst_dir)
 	shutil.copyfile(src, dst)
 
-	# add line in the info json to tell where to look for the lookup table 
+	# add line in the info json to tell where to look for the lookup table
 	info_json_file = os.path.join(precomputed_file, "info")
 	info_json = None
 	with open(info_json_file) as f:
@@ -126,8 +126,7 @@ def add_lookup_table(precomputed_file: str, lookup_table_template: str):
 		json.dump(info_json, f, ensure_ascii=False, cls=NpEncoder)
 
 
-
-project_code = "19.gaj.43"
+"""project_code = "19.gaj.43"
 spec_id = "190415-2_1"
 spec_id_fresh = spec_id.replace("_", "-")
 runno = "N57205NLSAM"
@@ -137,15 +136,17 @@ nhdr_file="{}/{}_RCCF_labels.nhdr".format(data_dir, runno)
 #precomputed_file = "{}_subprocess_run_gunzip.precomputed".format(nhdr_file.split(".")[0])
 precomputed_file = "{}/{}_{}_RCCF_labels.precomputed".format(data_dir, spec_id_fresh, runno)
 # need to copy this folder into the precomputed file, and then also write the one line in the baselevel precomputed info.json
-
+"""
 ##****#*#*#*#*#*#
 ## MAIN
+
+# THIS IS FOR RCCF ONLY
+# MAKE NEW ONE FOR WHS
 lookup_table_template = "/Users/harry/scratch/neuroglancer_python_prototype/data/segment_properties/info"
 
 if len(sys.argv) > 2:
-	nhdr_file = sys.argv[1]
-	precomputed_file = sys.argv[2]
-
+  nhdr_file = sys.argv[1]
+  precomputed_file = sys.argv[2]
 print(nhdr_file)
 print(precomputed_file)
 

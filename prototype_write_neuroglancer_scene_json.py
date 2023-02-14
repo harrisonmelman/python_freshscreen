@@ -24,6 +24,7 @@ import sys
 import nrrd
 import numpy as np
 import functools
+import glob
 # header = nrrd.read_header('output.nrrd') # possible to only read the nrrd header
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
@@ -162,9 +163,9 @@ def get_s3_url_from_file_basename(filename: str):
     # TODO: test to ensure that os.path.join always does the right job here. PROBABLY fails on windows
     suffix = filename.split(".")[-1]
     if "n5" in suffix:
-        return os.path.join(N5_PREFIX, filename, N5_SUFFIX)
+        return os.path.join(N5_PREFIX, filename, N5_SUFFIX).replace("\\","/")
     elif "precomputed" in suffix:
-        return os.path.join(PRECOMPUTED_PREFIX, filename)
+        return os.path.join(PRECOMPUTED_PREFIX, filename).replace("\\","/")
     else:
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
@@ -254,10 +255,8 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
-        json_template = os.path.join(dirname, json_template)
+        json_template = os.path.join(dirname, json_template).replace("\\","/")
         print(dirname)
-    print(json_template)
-    exit()
 
     # .lower() converts string to all lowercase
     if "color" in get_contrast_from_filename(data_file).lower():
@@ -276,7 +275,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
 
     ###**************####
     # edit image layer
-    ###**************####
+    ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
     image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file)
@@ -379,7 +378,6 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
     # who should be responsible for choosing that name?
     write_freshscreen_display_json(data, data_file, output_file)
-    exit()
     #url = convert_json_to_url(convert_dict_to_string(data))
 
 # also take in the data_file name because it is available to pass, and it is "obfuscated" within the data dict by the N5_PREFIX/PRECOMPUTED_PREFIX
@@ -462,13 +460,12 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
         contrast = get_contrast_from_filename(f)
 
         data_file = f
-        data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(runno, contrast))
+        data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(runno, contrast)).replace("\\","/")
         if not os.path.isfile(data_nhdr):
-            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast))
-        # TODO: make next line more extensible. it needs a "find" feature to handle cases when filename looks liie $runno_RCCF_MC_labels instead of the canonical
-        label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "{}_RCCF_labels.nhdr".format(runno))
-        if not os.path.isfile(label_nhdr):
-            label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "{}_RCCF_MC_labels.nhdr".format(runno))
+            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
+
+        label_nhdr = glob.glob(os.path.join(NHDR_DIR,"labels","*", "{}*label*.nhdr".format(runno)).replace("\\","/"))
+        print(label_nhdr)
         if not os.path.isfile(label_nhdr):
             logging.error("cannot find label file nhdr locally")
             exit()
@@ -477,11 +474,12 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
             # lightsheet volumes are saved locally with spec id instead of runno in the filename
             # TODO: clarify between freshscreen and CIVM specimen id's (i.e. difference between 190415-2_1 and 190415-2-1)
             print("contrast is: {}".format(contrast))
+            # i think this if statement is NEVER reachable
             if contrast in "mGRE":
                 contrast = "mAVG"
-            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast))
+            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
 
-        output_file = os.path.join(output_dir, "{}.json".format(f))
+        output_file = os.path.join(output_dir, "{}.json".format(f)).replace("\\","/")
         print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
         write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
 
@@ -494,25 +492,29 @@ if len(sys.argv) > 1:
     #specimen_id = "200302-1_1"
     project_code = sys.argv[1]
     specimen_id = sys.argv[2]
-    output_dir = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
+    #output_dir = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
+    #output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
+    output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
     # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
     #NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
-    NHDR_DIR = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+    #NHDR_DIR = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+    NHDR_DIR = "U:/freshscreen_n5_library/to_S3"
     loop_through_specimen_in_freshscreen(specimen_id, output_dir)
 else:
     logging.warning("Not enough input arguments. Requires project_code and specimen_id as positional arguments")
 
 
 exit()
+# deprecated
 #**********************************************************************************************#
 # MAIIN
 data_file = "200316-1-1_N10_N58204NLSAM_fa.n5"
 label_file = "200316-1-1_N58204NLSAM_RCCF_labels.precomputed"
-data_nhdr = os.path.join(NHDR_DIR,"N58204NLSAM_fa.nhdr")
-label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N58204NLSAM_RCCF_labels.nhdr")
+data_nhdr = os.path.join(NHDR_DIR,"N58204NLSAM_fa.nhdr").replace("\\","/")
+label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N58204NLSAM_RCCF_labels.nhdr").replace("\\","/")
 
 # now test witha  lightsheet
-data_nhdr = os.path.join(NHDR_DIR,"fullres_2003NeuN.nhdr")
+data_nhdr = os.path.join(NHDR_DIR,"fullres_2003NeuN.nhdr").replace("\\","/")
 data_file = "200316-1-1_N12_N58204NLSAM_NeuN-ls.n5"
 
 # test with 190415-1_1
@@ -521,8 +523,8 @@ spec_id = "190415-2_1"
 NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, spec_id)
 data_file = "190415-2-1_N09_N57205NLSAM_fa.n5"
 label_file = "190415-2-1_N57205NLSAM_labels.precomputed"
-data_nhdr = os.path.join(NHDR_DIR,"N57205NLSAM_fa.nhdr")
-label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhdr")
+data_nhdr = os.path.join(NHDR_DIR,"N57205NLSAM_fa.nhdr").replace("\\","/")
+label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhdr").replace("\\","/")
 
 
 # for now, min/max should be defined by a  dict of default values
