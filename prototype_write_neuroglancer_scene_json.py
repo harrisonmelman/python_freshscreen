@@ -460,14 +460,17 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
         contrast = get_contrast_from_filename(f)
 
         data_file = f
-        data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(runno, contrast)).replace("\\","/")
+        data_nhdr = glob.glob(os.path.join(nhdr_dir, "{}*{}*.nhdr".format(runno, contrast)).replace("\\","/"))
         if not os.path.isfile(data_nhdr):
-            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
+            data_nhdr = glob.glob(os.path.join(nhdr_dir, "{}*{}*.nhdr".format(spec_id, contrast)).replace("\\","/"))
 
-        label_nhdr = glob.glob(os.path.join(NHDR_DIR,"labels","*", "{}*label*.nhdr".format(runno)).replace("\\","/"))
+        label_nhdr = glob.glob(os.path.join(nhdr_dir,"labels","*", "{}*label*.nhdr".format(runno)).replace("\\","/"))
         print(label_nhdr)
         if not os.path.isfile(label_nhdr):
-            logging.error("cannot find label file nhdr locally")
+            logging.error("cannot find label file nhdr locally: {}".format(label_nhdr))
+            exit()
+        if not os.path.isfile(data_nhdr):
+            logging.error("cannot find data nhdr locally: {}".format(data_nhdr))
             exit()
 
         if contrast in LIGHTSHEET_CONTRASTS:
@@ -477,7 +480,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
             # i think this if statement is NEVER reachable
             if contrast in "mGRE":
                 contrast = "mAVG"
-            data_nhdr = os.path.join(NHDR_DIR, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
+            data_nhdr = os.path.join(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
 
         output_file = os.path.join(output_dir, "{}.json".format(f)).replace("\\","/")
         print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
@@ -487,44 +490,48 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # MAIIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
-logging.getLogger().setLevel(logging.INFO)
-if len(sys.argv) > 1:
-    #specimen_id = "200302-1_1"
-    project_code = sys.argv[1]
-    specimen_id = sys.argv[2]
-    #output_dir = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
-    #output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
-    output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
-    # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-    #NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
-    #NHDR_DIR = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
-    NHDR_DIR = "U:/freshscreen_n5_library/to_S3"
-    loop_through_specimen_in_freshscreen(specimen_id, output_dir)
-else:
-    logging.warning("Not enough input arguments. Requires project_code and specimen_id as positional arguments")
+def main():
+    logging.getLogger().setLevel(logging.INFO)
+    if len(sys.argv) > 2:
+        # i am not even using project_code
+        project_code = sys.argv[1]
+        specimen_id = sys.argv[2]
+        if len(sys.argv > 4):
+            # then I do not want to use the typical R drive organization, instead pass an nhdr_dir(input) and out_dir
+            nhdr_dir = sys.argv[3]
+            output_dir = sys.argv[4]
+        else:
+            nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            #nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
+        output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
+        # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir)
+    else:
+        logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 
-
+main()
 exit()
 # deprecated
 #**********************************************************************************************#
 # MAIIN
 data_file = "200316-1-1_N10_N58204NLSAM_fa.n5"
 label_file = "200316-1-1_N58204NLSAM_RCCF_labels.precomputed"
-data_nhdr = os.path.join(NHDR_DIR,"N58204NLSAM_fa.nhdr").replace("\\","/")
-label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N58204NLSAM_RCCF_labels.nhdr").replace("\\","/")
+data_nhdr = os.path.join(nhdr_dir,"N58204NLSAM_fa.nhdr").replace("\\","/")
+label_nhdr = os.path.join(nhdr_dir,"labels","RCCF", "N58204NLSAM_RCCF_labels.nhdr").replace("\\","/")
 
 # now test witha  lightsheet
-data_nhdr = os.path.join(NHDR_DIR,"fullres_2003NeuN.nhdr").replace("\\","/")
+data_nhdr = os.path.join(nhdr_dir,"fullres_2003NeuN.nhdr").replace("\\","/")
 data_file = "200316-1-1_N12_N58204NLSAM_NeuN-ls.n5"
 
 # test with 190415-1_1
 project_code = "19.gaj.43"
 spec_id = "190415-2_1"
-NHDR_DIR = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, spec_id)
+nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, spec_id)
 data_file = "190415-2-1_N09_N57205NLSAM_fa.n5"
 label_file = "190415-2-1_N57205NLSAM_labels.precomputed"
-data_nhdr = os.path.join(NHDR_DIR,"N57205NLSAM_fa.nhdr").replace("\\","/")
-label_nhdr = os.path.join(NHDR_DIR,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhdr").replace("\\","/")
+data_nhdr = os.path.join(nhdr_dir,"N57205NLSAM_fa.nhdr").replace("\\","/")
+label_nhdr = os.path.join(nhdr_dir,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhdr").replace("\\","/")
 
 
 # for now, min/max should be defined by a  dict of default values
