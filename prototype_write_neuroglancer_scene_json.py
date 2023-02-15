@@ -488,11 +488,11 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
-# MAIIN with command line arguments
+# MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 def main():
     logging.getLogger().setLevel(logging.INFO)
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 4:
         # i am not even using project_code
         project_code = sys.argv[1]
         specimen_id = sys.argv[2]
@@ -501,10 +501,10 @@ def main():
             nhdr_dir = sys.argv[3]
             output_dir = sys.argv[4]
         else:
-            nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
-            #nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            #nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
-        output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
+            #output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
         loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir)
     else:
