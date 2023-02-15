@@ -140,13 +140,15 @@ precomputed_file = "{}/{}_{}_RCCF_labels.precomputed".format(data_dir, spec_id_f
 ##****#*#*#*#*#*#
 ## MAIN
 
+if len(sys.argv) > 2:
+	nhdr_file = sys.argv[1]
+	precomputed_file = sys.argv[2]
+	label_type = sys.argv[3]
+
 # THIS IS FOR RCCF ONLY
 # MAKE NEW ONE FOR WHS
-lookup_table_template = "/Users/harry/scratch/neuroglancer_python_prototype/data/segment_properties/info"
+lookup_table_template = "/Users/harry/scratch/neuroglancer_python_prototype/data/segment_properties/{}/info".format(label_type)
 
-if len(sys.argv) > 2:
-  nhdr_file = sys.argv[1]
-  precomputed_file = sys.argv[2]
 print(nhdr_file)
 print(precomputed_file)
 
