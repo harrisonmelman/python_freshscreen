@@ -91,7 +91,8 @@ def get_default_threshold(filename: str):
         "Syto16" : 1300,
         "tdi" : 20,
         "tdi3" : 20,
-        "tdi5" : 20
+        "tdi5" : 20,
+        "b0" : 30000
     }
 
     # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
@@ -406,7 +407,7 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
     write_dict_to_json_file(output_file, organization_json)
 
 # TODO: boto3 is an aws sdk for python. but it is confusing
-def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_file: str=None):
+def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir: str, label_file: str=None):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
     import subprocess
     rclone = "K:/DevApps/rclone-v1.58.1-windows-amd64/rclone.exe"
@@ -460,12 +461,20 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
         contrast = get_contrast_from_filename(f)
 
         data_file = f
-        data_nhdr = glob.glob(os.path.join(nhdr_dir, "{}*{}*.nhdr".format(runno, contrast)).replace("\\","/"))
-        if not os.path.isfile(data_nhdr):
-            data_nhdr = glob.glob(os.path.join(nhdr_dir, "{}*{}*.nhdr".format(spec_id, contrast)).replace("\\","/"))
+        data_nhdr = glob.glob(os.path.join(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)).replace("\\","/"))
+        if len(data_nhdr) == 0:
+            # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
+            data_nhdr = glob.glob(os.path.join(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast))).replace("\\","/")
+        if len(data_nhdr) != 1:
+            logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr))
+            exit()
+        data_nhdr = data_nhdr[0].replace("\\","/")
 
-        label_nhdr = glob.glob(os.path.join(nhdr_dir,"labels","*", "{}*label*.nhdr".format(runno)).replace("\\","/"))
-        print(label_nhdr)
+        label_nhdr = glob.glob(os.path.join(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)).replace("\\","/"))
+        if len(label_nhdr) == 0:
+            logging.error("cannot find a relevant label nhdr file for {}.".format(spec_id))
+            exit()
+        label_nhdr = label_nhdr[0].replace("\\","/")
         if not os.path.isfile(label_nhdr):
             logging.error("cannot find label file nhdr locally: {}".format(label_nhdr))
             exit()
@@ -506,7 +515,7 @@ def main():
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
             #output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir)
+        loop_through_specimen_in_freshscreen(specimen_id, nhdr_dir, output_dir)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 
