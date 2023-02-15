@@ -492,11 +492,11 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, label_fi
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 def main():
     logging.getLogger().setLevel(logging.INFO)
-    if len(sys.argv) > 4:
+    if len(sys.argv) > 2:
         # i am not even using project_code
         project_code = sys.argv[1]
         specimen_id = sys.argv[2]
-        if len(sys.argv > 4):
+        if len(sys.argv) > 4:
             # then I do not want to use the typical R drive organization, instead pass an nhdr_dir(input) and out_dir
             nhdr_dir = sys.argv[3]
             output_dir = sys.argv[4]
