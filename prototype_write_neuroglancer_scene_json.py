@@ -164,9 +164,9 @@ def get_s3_url_from_file_basename(filename: str):
     # TODO: test to ensure that os.path.join always does the right job here. PROBABLY fails on windows
     suffix = filename.split(".")[-1]
     if "n5" in suffix:
-        return os.path.join(N5_PREFIX, filename, N5_SUFFIX).replace("\\","/")
+        return pathjoin(N5_PREFIX, filename, N5_SUFFIX)
     elif "precomputed" in suffix:
-        return os.path.join(PRECOMPUTED_PREFIX, filename).replace("\\","/")
+        return pathjoin(PRECOMPUTED_PREFIX, filename)
     else:
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
@@ -256,7 +256,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
-        json_template = os.path.join(dirname, json_template).replace("\\","/")
+        json_template = pathjoin(dirname, json_template)
         print(dirname)
 
     # .lower() converts string to all lowercase
@@ -461,16 +461,20 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         contrast = get_contrast_from_filename(f)
 
         data_file = f
-        data_nhdr = glob.glob(os.path.join(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)).replace("\\","/"))
+        data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
         if len(data_nhdr) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
-            data_nhdr = glob.glob(os.path.join(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast))).replace("\\","/")
+            data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast)))
         if len(data_nhdr) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr))
             exit()
         data_nhdr = data_nhdr[0].replace("\\","/")
+        print(data_nhdr)
+        exit()
 
-        label_nhdr = glob.glob(os.path.join(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)).replace("\\","/"))
+        label_nhdr = glob.glob(pathjoin(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)))
+        print(label_nhdr)
+        exit()
         if len(label_nhdr) == 0:
             logging.error("cannot find a relevant label nhdr file for {}.".format(spec_id))
             exit()
@@ -489,11 +493,16 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             # i think this if statement is NEVER reachable
             if contrast in "mGRE":
                 contrast = "mAVG"
-            data_nhdr = os.path.join(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast)).replace("\\","/")
+            data_nhdr = pathjoin(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast))
 
-        output_file = os.path.join(output_dir, "{}.json".format(f)).replace("\\","/")
+        output_file = pathjoin(output_dir, "{}.json".format(f))
         print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
         write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
+
+def pathjoin(*args):
+    """takes a list of path components and joins them together with forward slashes as the separator
+    this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
+    return "/".join(args)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
@@ -520,35 +529,3 @@ def main():
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 
 main()
-exit()
-# deprecated
-#**********************************************************************************************#
-# MAIIN
-data_file = "200316-1-1_N10_N58204NLSAM_fa.n5"
-label_file = "200316-1-1_N58204NLSAM_RCCF_labels.precomputed"
-data_nhdr = os.path.join(nhdr_dir,"N58204NLSAM_fa.nhdr").replace("\\","/")
-label_nhdr = os.path.join(nhdr_dir,"labels","RCCF", "N58204NLSAM_RCCF_labels.nhdr").replace("\\","/")
-
-# now test witha  lightsheet
-data_nhdr = os.path.join(nhdr_dir,"fullres_2003NeuN.nhdr").replace("\\","/")
-data_file = "200316-1-1_N12_N58204NLSAM_NeuN-ls.n5"
-
-# test with 190415-1_1
-project_code = "19.gaj.43"
-spec_id = "190415-2_1"
-nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, spec_id)
-data_file = "190415-2-1_N09_N57205NLSAM_fa.n5"
-label_file = "190415-2-1_N57205NLSAM_labels.precomputed"
-data_nhdr = os.path.join(nhdr_dir,"N57205NLSAM_fa.nhdr").replace("\\","/")
-label_nhdr = os.path.join(nhdr_dir,"labels","RCCF", "N57205NLSAM_RCCF_labels.nhdr").replace("\\","/")
-
-
-# for now, min/max should be defined by a  dict of default values
-# make default be user's input, if none are given, yell at user and use default dict
-#write_three_layer_json(data_file,label_file, data_nhdr, label_nhdr, data_threshold_max=None)
-specimen_id = "190415-2_1"
-output_dir_default = "/Users/harry/scratch/neuroglancer_python_prototype/data/other/freshscreen_json_display_files/{}".format(specimen_id)
-if not os.path.isdir(output_dir_default):
-    os.makedirs(output_dir_default)
-loop_through_specimen_in_freshscreen(specimen_id, output_dir_default)
-#**********************************************************************************************#

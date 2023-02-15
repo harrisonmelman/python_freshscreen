@@ -104,14 +104,14 @@ class NpEncoder(json.JSONEncoder):
 def add_lookup_table(precomputed_file: str, lookup_table_template: str):
 	# lookup table will always be the same.
 	src = lookup_table_template
-	dst_dir = os.path.join(precomputed_file, "segment_properties")
-	dst = os.path.join(dst_dir, "info")
+	dst_dir = pathjoin(precomputed_file, "segment_properties")
+	dst = pathjoin(dst_dir, "info")
 	if not os.path.isdir(dst_dir):
 		os.makedirs(dst_dir)
 	shutil.copyfile(src, dst)
 
 	# add line in the info json to tell where to look for the lookup table
-	info_json_file = os.path.join(precomputed_file, "info")
+	info_json_file = pathjoin(precomputed_file, "info")
 	info_json = None
 	with open(info_json_file) as f:
 		info_json = json.load(f)
@@ -124,6 +124,13 @@ def add_lookup_table(precomputed_file: str, lookup_table_template: str):
 		print("\n\n\n")
 		print(f)
 		json.dump(info_json, f, ensure_ascii=False, cls=NpEncoder)
+
+# TODO: put this in a cenrtal location
+# this is not needed on mac and this script ONLY WORKS ON MAC (or the cluster probably)
+def pathjoin(*args):
+    """takes a list of path components and joins them together with forward slashes as the separator
+    this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
+    return "/".join(args)
 
 
 """project_code = "19.gaj.43"
