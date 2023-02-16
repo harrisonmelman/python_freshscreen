@@ -605,6 +605,19 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     data["selectedLayer"]["layer"] = image_layer["name"]
     data["selectedLayer"]["visible"] = True
 
+    # determines how zoomed in it is
+        # found 2 works well for 15um data
+        # 0.6 works well for 45um
+        # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
+    eps=1e-10
+    scale_factor = 1
+    if abs(data_voxel_sizes[0] - 0.000015) < eps:
+        scale_factor = 2
+    if abs(data_voxel_sizes[0] - 0.000045) < eps:
+        scale_factor = 0.6
+    data["crossSectionScale"] = scale_factor
+
+
     # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
     # these could really all be done in the same loop, because the keys will always be [x,y,z] (TODO: confirm this)
     """i = 0
