@@ -63,7 +63,8 @@ def get_runno_from_filename(filename: str):
         if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
             return guess
     logging.warning("unable to find specimen run number from the filename: {}".format(filename))
-    return None
+    return f[-2]
+    #return None
 
 def get_contrast_from_filename(filename: str):
     #return filename.split("_")[-1].split(".")[0]
@@ -95,11 +96,24 @@ def get_default_threshold(filename: str):
         "b0" : 30000
     }
 
+    d17gaj40_THRESHOLDS = {
+        "dwi" : 5000,
+        "fa" : 1,
+        "ad" : 0.0009, #0.4, #0.02,
+        "rd" : 0.0005, #0.4, #0.02,
+        "md" : 0.0006, #0.4, #0.02
+        "color" : 128,
+        "tdi" : 20,
+        "tdi3" : 20,
+        "tdi5" : 20,
+        "b0" : 15000
+    }
     # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
     # split on "_" and take the last one
     # split on "." to remove the file extension
     contrast = get_contrast_from_filename(filename)
-    return DEFAULT_THRESHOLDS[contrast]
+    #return DEFAULT_THRESHOLDS[contrast]
+    return d17gaj40_THRESHOLDS[contrast]
 
 def convert_dict_to_string(data: dict):
     return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
@@ -462,19 +476,18 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
 
         data_file = f
         data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
+        print(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
         if len(data_nhdr) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
             data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast)))
         if len(data_nhdr) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr))
             exit()
+        # WARNING: glob still throws backslashes in...
+            # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
         data_nhdr = data_nhdr[0].replace("\\","/")
-        print(data_nhdr)
-        exit()
 
         label_nhdr = glob.glob(pathjoin(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)))
-        print(label_nhdr)
-        exit()
         if len(label_nhdr) == 0:
             logging.error("cannot find a relevant label nhdr file for {}.".format(spec_id))
             exit()
