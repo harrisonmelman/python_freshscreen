@@ -69,44 +69,55 @@ def get_runno_from_filename(filename: str):
 def get_contrast_from_filename(filename: str):
     #return filename.split("_")[-1].split(".")[0]
     # dirty fix for a couple of the lightsheet volumes endinging in -ls on freshscreen
-    return filename.split("_")[-1].split(".")[0].split("-")[0]
+    return filename.split("_")[-1].split(".")[0]
+    # old version was deleting the "-color" part of "nqa-color", so search was failing
+    # unknown consequences
+    #return filename.split("_")[-1].split(".")[0].split("-")[0]
 
 def get_default_threshold(filename: str):
     """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
 
     Completely dependendent on current (11/7/2022) freshscreen filenames"""
     DEFAULT_THRESHOLDS = {
-        "dwi" : 25000,
-        "fa" : 1,
-        "ad" : 0.8, #0.4, #0.02,
-        "rd" : 0.8, #0.4, #0.02,
-        "md" : 0.8, #0.4, #0.02,
-        "qa" : 1,
-        "gfa" : 1,
-        "color" : 128,
-        "NeuN" : 800,
-        "MBP" : 1300,
-        "autof" : 1200,
-        "Thy1" : 1500,
-        "IBA1" : 1300,
-        "Syto16" : 1300,
-        "tdi" : 20,
-        "tdi3" : 20,
-        "tdi5" : 20,
-        "b0" : 30000
+        "dwi" : (0,25000),
+        "fa" : (0,1),
+        "ad" : (0,0.8),
+        "rd" : (0,0.8),
+        "md" : (0,0.8),
+        "qa" : (0,1),
+        "gfa" : (0,1),
+        "color" : (0,128),
+        "NeuN" : (0,800),
+        "MBP" : (0,1300),
+        "autof" : (0,1200),
+        "Thy1" : (0,1500),
+        "IBA1" : (0,1300),
+        "Syto16" : (0,1300),
+        "tdi" : (0,20),
+        "tdi3" : (0,20),
+        "tdi5" : (0,20),
+        "b0" : (0,30000),
+        "nqa-color" : (0,100),
+        "gqi-color" : (0,100),
+        "tdi-color" : (0,100),
+        "tdi3-color" : (0,100)
     }
     # no idea if this will work as expected or not...
     d17gaj40_THRESHOLDS = {
         "dwi" : (0,5000),
         "fa" : (0,1),
-        "ad" : (0,0.0009), #0.4, #0.02,
-        "rd" : (0,0.0005), #0.4, #0.02,
-        "md" : (0,0.0006), #0.4, #0.02
+        "ad" : (0,0.0009),
+        "rd" : (0,0.0005),
+        "md" : (0,0.0006),
         "color" : (0,128),
         "tdi" : (0,20),
         "tdi3" : (0,20),
         "tdi5" : (0,20),
-        "b0" : (0,15000)
+        "b0" : (0,15000),
+        "nqa-color" : (0,100),
+        "gqi-color" : (0,100),
+        "tdi-color" : (0,100),
+        "tdi3-color" : (0,100)
     }
     # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
     # split on "_" and take the last one
@@ -406,11 +417,6 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         json_template = pathjoin(dirname, json_template)
         print(dirname)
 
-    # .lower() converts string to all lowercase
-    if "color" in get_contrast_from_filename(data_file).lower():
-        logging.warning("Color files are not currently supported. Make this one manually.")
-        return None
-
     if data_threshold_max is None:
         pass
 
@@ -569,7 +575,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     ###**************####
     # TODO: add more functions. this looks almost identical to code above
     # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
-    rccf_label_layer = data["layers"][5]
+    rccf_label_layer = data["layers"][4]
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
     rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
 
@@ -626,6 +632,7 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
         - neuroglancer url
 
     create a dict, convert to json, write to file"""
+    print("DABBADABBA DOOOOOO")
     organization_json = dict()
     organization_json["object_Name"] = data_file
     # if user does not specify, then look to see what I named this layer in neuroglancer and use that
@@ -684,7 +691,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             return None
     for f in filelist:
         if "color" not in f.lower():
-            logging.warning("color images not currently supported")
+            logging.warning("color images only rn srry")
             continue
         if "label" in f.lower():
             continue
@@ -696,9 +703,15 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         runno = f.split("_")[2]
         contrast = get_contrast_from_filename(f)
 
+        # this is a DIRTY HACK, we do not always have good nhdrs for color (and rn we have merged color niftis that are a pain and a half to create a nhdr for)
+            #BUT we only use the nhdr file to grab metadata such as dimensions and transform matrix
+            # do not use contrast type or data file from the nhdr so we do not (necessarily) need the correct nhdr, as long as it is from the same specimen
+            # i think this is safe because the other times we use contrast (like calculating threshold) we make another query to get_contrast_from_filename, so it will revert back to nqa-color then 
+        if "color" in contrast.lower():
+            contrast="dwi"
+
         data_file = f
         data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
-        print(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
         if len(data_nhdr) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
             data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast)))
@@ -732,7 +745,9 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
 
         output_file = pathjoin(output_dir, "{}.json".format(f))
         print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
+        print(f)
         if "color" in f.lower():
+            print("HIHIHI")
             write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
             continue
         write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)

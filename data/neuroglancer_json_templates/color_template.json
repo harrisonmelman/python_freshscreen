@@ -80,6 +80,18 @@
         "opacity": 1,
         "blend": "additive",
         "shader": "#uicontrol invlerp normalized(range=[1,100], window=[0,255], clamp=false)\nvoid main() {\n  if(normalized() > 0.00){\n  \temitRGBA(vec4(normalized(),0,0,0.75));\n  }\n  else{\n    emitRGBA(vec4(0,0,0,0.1));\n  }\n}\n",
+        "shaderControls": {
+          "normalized": {
+            "range": [
+              0,
+              100
+            ],
+            "window": [
+              0,
+              255
+            ]
+          }
+        },
         "name": "GQI color -- RED"
       },
       {
@@ -266,6 +278,20 @@
                 0.000015,
                 "m"
               ]
+            },
+            "inputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
             }
           },
           "subsources": {
@@ -276,18 +302,6 @@
         "tab": "source",
         "opacity": 1,
         "shader": "#uicontrol invlerp normalized\nvoid main() {\n  if(normalized() > 0.0){\n    emitGrayscale(normalized());\n  }\n}\n",
-        "shaderControls": {
-            "normalized": {
-              "range": [
-                0,
-                100
-              ],
-              "window": [
-                0,
-                255
-              ]
-            }
-          },
         "name": "Orientation Label",
         "visible": false
       },
@@ -317,6 +331,20 @@
               ]
             ],
             "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            },
+            "inputDimensions": {
               "x": [
                 0.000015,
                 "m"
