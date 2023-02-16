@@ -1,15 +1,17 @@
 project_code="17.gaj.40"
 label_type="WHS_heritability";
-is_windows=0;
+is_windows=1;
 
 in_dir=/Volumes/PWP-CIVM-CTX01/freshscreen_n5_library/17.gaj.40;
 out_dir=/Volumes/PWP-CIVM-CTX01/freshscreen_n5_library/to_S3/labels;
 code_dir=/Users/harry/scratch/neuroglancer_python_prototype;
-if $is_windows; then
+if [ $is_windows ]; then
     in_dir=/u/freshscreen_n5_library/17.gaj.40;
     out_dir=/u/freshscreen_n5_library/to_S3/labels;
     code_dir=/k/workstation/code/display/python_freshscreen/;
 fi
+
+outout=$out_dir/WHS_heritability;
 
 cd ${in_dir}
 for x in BTBR C57BL_6J CAST DB2; do
@@ -21,12 +23,21 @@ for x in BTBR C57BL_6J CAST DB2; do
         spec_id_fresh=${y%_*};
         runno=${y##*_};
         runno=${runno%/*};
+
         in_nii=$(ls ${label_dir}/${runno}*labels*nii);
+        if [ ! -f $in_nii ]; then
+            # the tool used to read a nhdr cannot handle compressed data files
+            in_nii=$(ls ${label_dir}/${runno}*labels*nii.gz);
+            gunzip $in_nii;
+            in_nii=$(ls ${label_dir}/${runno}*labels*nii);
+        fi
         in_nhdr=${in_nii%.nii};
         in_nhdr=${in_nhdr}.nhdr;
+
         if [ ! -f $in_nhdr ]; then
             mk_nhdr ${in_nii};
         fi
+
         in_file=$in_nhdr;
         out_file=${out_dir}/${spec_id_fresh}_${runno}_${label_type}_labels.precomputed;
         if [ ! -d $out_file ]; then
