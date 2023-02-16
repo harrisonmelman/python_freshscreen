@@ -1,0 +1,347 @@
+{
+    "dimensions": {
+      "x": [
+        0.000015,
+        "m"
+      ],
+      "y": [
+        0.000015,
+        "m"
+      ],
+      "z": [
+        0.000015,
+        "m"
+      ]
+    },
+    "position": [
+      0,
+      0,
+      0
+    ],
+    "crossSectionScale": 2,
+    "projectionScale": 1000,
+    "layers": [
+      {
+        "type": "image",
+        "source": {
+          "url": "n5://https://d3mof5o.s3.amazonaws.com/200302-1-1_N03_N58211NLSAM_gqi-color.n5/setup0/timepoint0/",
+          "transform": {
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                -390.5084260198894
+              ],
+              [
+                0,
+                1,
+                0,
+                -500.8469561191093
+              ],
+              [
+                0,
+                0,
+                -1,
+                269.90931322703784
+              ]
+            ],
+            "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            },
+            "inputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            }
+          }
+        },
+        "tab": "source",
+        "opacity": 1,
+        "blend": "additive",
+        "shader": "#uicontrol invlerp normalized(range=[1,100], window=[0,255], clamp=false)\nvoid main() {\n  if(normalized() > 0.00){\n  \temitRGBA(vec4(normalized(),0,0,0.75));\n  }\n  else{\n    emitRGBA(vec4(0,0,0,0.1));\n  }\n}\n",
+        "name": "GQI color -- RED"
+      },
+      {
+        "type": "image",
+        "source": {
+          "url": "n5://https://d3mof5o.s3.amazonaws.com/200302-1-1_N03_N58211NLSAM_gqi-color.n5/setup1/timepoint0/",
+          "transform": {
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                -390.5084260198894
+              ],
+              [
+                0,
+                1,
+                0,
+                -500.8469561191093
+              ],
+              [
+                0,
+                0,
+                -1,
+                269.90931322703784
+              ]
+            ],
+            "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            },
+            "inputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            }
+          }
+        },
+        "tab": "source",
+        "opacity": 0.57,
+        "blend": "additive",
+        "shader": "#uicontrol invlerp normalized(range=[1,100], window=[0,255], clamp=false)\nvoid main() {\n  if(normalized() > 0.0){\n  \temitRGBA(vec4(0,normalized(),0,0.75));\n  }\n  else{\n    emitRGBA(vec4(0,0,0,0.1));\n  }\n}\n",
+        "shaderControls": {
+            "normalized": {
+              "range": [
+                0,
+                100
+              ],
+              "window": [
+                0,
+                255
+              ]
+            }
+          },
+        "name": "GQI color -- GREEN"
+      },
+      {
+        "type": "image",
+        "source": {
+          "url": "n5://https://d3mof5o.s3.amazonaws.com/200302-1-1_N03_N58211NLSAM_gqi-color.n5/setup2/timepoint0/",
+          "transform": {
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                -390.5084260198894
+              ],
+              [
+                0,
+                1,
+                0,
+                -500.8469561191093
+              ],
+              [
+                0,
+                0,
+                -1,
+                269.90931322703784
+              ]
+            ],
+            "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            },
+            "inputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            }
+          }
+        },
+        "tab": "source",
+        "opacity": 0.56,
+        "blend": "additive",
+        "shader": "#uicontrol invlerp normalized(range=[1,100], window=[0,255], clamp=false)\nvoid main() {\n  if(normalized() > 0.0){\n  \temitRGBA(vec4(0,0,normalized(),0.75));\n  }\n  else{\n    emitRGBA(vec4(0,0,0,0.1));\n  }\n}\n",
+        "shaderControls": {
+            "normalized": {
+              "range": [
+                0,
+                100
+              ],
+              "window": [
+                0,
+                255
+              ]
+            }
+          },
+        "name": "GQI color -- BLUE"
+      },
+      {
+        "type": "image",
+        "source": {
+          "url": "n5://https://d3mof5o.s3.amazonaws.com/orientation_label.n5/setup0/timepoint0/",
+          "transform": {
+            "matrix": [
+              [
+                600000,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                600000,
+                0,
+                -928
+              ],
+              [
+                0,
+                0,
+                600000,
+                -800
+              ]
+            ],
+            "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            }
+          },
+          "subsources": {
+            "default": true
+          },
+          "enableDefaultSubsources": false
+        },
+        "tab": "source",
+        "opacity": 1,
+        "shader": "#uicontrol invlerp normalized\nvoid main() {\n  if(normalized() > 0.0){\n    emitGrayscale(normalized());\n  }\n}\n",
+        "shaderControls": {
+            "normalized": {
+              "range": [
+                0,
+                100
+              ],
+              "window": [
+                0,
+                255
+              ]
+            }
+          },
+        "name": "Orientation Label",
+        "visible": false
+      },
+      {
+        "type": "segmentation",
+        "source": {
+          "url": "precomputed://https://d3mof5o.s3.amazonaws.com/200302-1-1_N58211NLSAM_RCCF_labels.precomputed",
+          "transform": {
+            "matrix": [
+              [
+                1,
+                0,
+                0,
+                -390.5084260198894
+              ],
+              [
+                0,
+                1,
+                0,
+                -500.8469561191093
+              ],
+              [
+                0,
+                0,
+                -1,
+                269.90931322703784
+              ]
+            ],
+            "outputDimensions": {
+              "x": [
+                0.000015,
+                "m"
+              ],
+              "y": [
+                0.000015,
+                "m"
+              ],
+              "z": [
+                0.000015,
+                "m"
+              ]
+            }
+          }
+        },
+        "tab": "source",
+        "selectedAlpha": 0.6,
+        "notSelectedAlpha": 0.1,
+        "ignoreNullVisibleSet": false,
+        "name": "N58211NLSAM labels"
+      }
+    ],
+    "selectedLayer": {
+      "size": 484,
+      "layer": "N58211NLSAM labels"
+    },
+    "layout": "4panel"
+  }
