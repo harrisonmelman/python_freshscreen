@@ -428,7 +428,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         return None
 
 
-    # NOTE that order matters here! 
+    # NOTE that order matters here!
         # in the color_template.json file I have hard-coded in the shader code to display red for channel 0, green (1), and blue (2)
         # if this order is not respected, then color channels will be swapped
     ###**************####
@@ -526,7 +526,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
 
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
-    
+
     ###**************####
     # edit image layer -- BLUE
     ###**************####"
@@ -568,7 +568,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
 
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
-    
+
 
     ###**************####
     # edit rCCF label layer
@@ -614,7 +614,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     if abs(data_voxel_sizes[0] - 0.000015) < eps:
         scale_factor = 2
     if abs(data_voxel_sizes[0] - 0.000045) < eps:
-        scale_factor = 0.6
+        scale_factor = 0.8
     data["crossSectionScale"] = scale_factor
 
 
@@ -703,9 +703,6 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             logging.warning("cannot find a label file in s3 for specimen {}".format(spec_id_fresh))
             return None
     for f in filelist:
-        if "color" not in f.lower():
-            logging.warning("color images only rn srry")
-            continue
         if "label" in f.lower():
             continue
         if "gre" in f.lower():
@@ -719,7 +716,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         # this is a DIRTY HACK, we do not always have good nhdrs for color (and rn we have merged color niftis that are a pain and a half to create a nhdr for)
             #BUT we only use the nhdr file to grab metadata such as dimensions and transform matrix
             # do not use contrast type or data file from the nhdr so we do not (necessarily) need the correct nhdr, as long as it is from the same specimen
-            # i think this is safe because the other times we use contrast (like calculating threshold) we make another query to get_contrast_from_filename, so it will revert back to nqa-color then 
+            # i think this is safe because the other times we use contrast (like calculating threshold) we make another query to get_contrast_from_filename, so it will revert back to nqa-color then
         if "color" in contrast.lower():
             contrast="dwi"
 
@@ -760,7 +757,6 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
         print(f)
         if "color" in f.lower():
-            print("HIHIHI")
             write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
             continue
         write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
