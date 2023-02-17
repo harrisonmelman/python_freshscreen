@@ -343,12 +343,13 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         i+=1
     logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
 
+
     # update shader controls (default window and level)
     # range is range of data to be rendered on screen
     # window is range of the slider the user can use to edit the range in the GUI
-    image_layer["shaderControls"]["normalized"]["range"][0] = 0
-    image_layer["shaderControls"]["normalized"]["window"][0] = 0
-    max_range = get_default_threshold(data_file)
+    (min_range,max_range) = get_default_threshold(data_file)
+    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
+    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
     image_layer["shaderControls"]["normalized"]["range"][1] = max_range
     image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
 
