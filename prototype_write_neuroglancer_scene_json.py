@@ -123,8 +123,8 @@ def get_default_threshold(filename: str):
     # split on "_" and take the last one
     # split on "." to remove the file extension
     contrast = get_contrast_from_filename(filename)
-    #return DEFAULT_THRESHOLDS[contrast]
-    return d17gaj40_THRESHOLDS[contrast]
+    return DEFAULT_THRESHOLDS[contrast]
+    #return d17gaj40_THRESHOLDS[contrast]
 
 def convert_dict_to_string(data: dict):
     return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
@@ -165,7 +165,7 @@ def convert_json_to_url(file: str):
             encoded_text = urllib.parse.quote("".join(f.read().split()))
     # missing a "#!" at beggining
     url = "https://neuroglancer.freshscreen.com/#!{}".format(encoded_text)
-    print("\n\n{}".format(url))
+    logging.info("\n\n{}".format(url))
     return url
 
 def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
@@ -284,7 +284,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
         json_template = pathjoin(dirname, json_template)
-        print(dirname)
+        logging.info(dirname)
 
     # .lower() converts string to all lowercase
     if "color" in get_contrast_from_filename(data_file).lower():
@@ -391,6 +391,17 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     data["selectedLayer"]["layer"] = image_layer["name"]
     data["selectedLayer"]["visible"] = True
 
+    eps=1e-15
+    scale_factor = 2
+    if abs(abs(data_voxel_sizes[0]) - 0.000015) < eps:
+        scale_factor = 2
+    if abs(abs(data_voxel_sizes[0]) - 0.000045) < eps:
+        scale_factor = 0.8
+    data["crossSectionScale"] = scale_factor
+    logging.info("setting scale factor to: {}".format(scale_factor))
+
+
+
     # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
     # these could really all be done in the same loop, because the keys will always be [x,y,z] (TODO: confirm this)
     """i = 0
@@ -402,7 +413,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         data["dimensions"][key][0] = label_voxel_sizes[i]
         i+=1
 
-    logging.info("final form of data dict: \n{}".format(data))
+    logging.debug("final form of data dict: \n{}".format(data))
 
     # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
     # who should be responsible for choosing that name?
@@ -416,7 +427,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
         json_template = pathjoin(dirname, json_template)
-        print(dirname)
+        logging.info(dirname)
 
     if data_threshold_max is None:
         pass
@@ -610,13 +621,14 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         # found 2 works well for 15um data
         # 0.6 works well for 45um
         # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
-    eps=1e-10
-    scale_factor = 1
-    if abs(data_voxel_sizes[0] - 0.000015) < eps:
+    eps=1e-15
+    scale_factor = 2
+    if abs(abs(data_voxel_sizes[0]) - 0.000015) < eps:
         scale_factor = 2
-    if abs(data_voxel_sizes[0] - 0.000045) < eps:
+    if abs(abs(data_voxel_sizes[0]) - 0.000045) < eps:
         scale_factor = 0.8
     data["crossSectionScale"] = scale_factor
+    logging.info("setting scale factor to: {}".format(scale_factor))
 
 
     # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
@@ -630,7 +642,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         data["dimensions"][key][0] = label_voxel_sizes[i]
         i+=1
 
-    logging.info("final form of data dict: \n{}".format(data))
+    logging.debug("final form of data dict: \n{}".format(data))
 
     # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
     # who should be responsible for choosing that name?
@@ -646,7 +658,6 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
         - neuroglancer url
 
     create a dict, convert to json, write to file"""
-    print("DABBADABBA DOOOOOO")
     organization_json = dict()
     organization_json["object_Name"] = data_file
     # if user does not specify, then look to see what I named this layer in neuroglancer and use that
@@ -722,13 +733,14 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             contrast="dwi"
 
         data_file = f
-        data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
+        data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
         if len(data_nhdr) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
-            data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast)))
+            data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*_{}*.nhdr".format(spec_id, contrast)))
         if len(data_nhdr) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr))
-            exit()
+            continue
+            #exit()
         # WARNING: glob still throws backslashes in...
             # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
         data_nhdr = data_nhdr[0].replace("\\","/")
@@ -755,8 +767,8 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             data_nhdr = pathjoin(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast))
 
         output_file = pathjoin(output_dir, "{}.json".format(f))
-        print("RUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
-        print(f)
+        logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
+
         if "color" in f.lower():
             write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
             continue
