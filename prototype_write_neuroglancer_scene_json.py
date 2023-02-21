@@ -87,12 +87,12 @@ def get_default_threshold(filename: str):
         "qa" : (0,1),
         "gfa" : (0,1),
         "color" : (0,128),
-        "NeuN" : (0,800),
+        "NeuN" : (0,1500),
         "MBP" : (0,1300),
         "autof" : (0,1200),
-        "Thy1" : (0,1500),
+        "Thy1" : (0,4000),
         "IBA1" : (0,1300),
-        "Syto16" : (0,1300),
+        "Syto16" : (0,12000),
         "tdi" : (0,20),
         "tdi3" : (0,20),
         "tdi5" : (0,20),
@@ -230,9 +230,6 @@ def flip_xform_dimension(xform_matrix: dict, dim: int=2):
     for i in range(len(xform_matrix[flip_row_index])):
         xform_matrix[flip_row_index][i] = -1 * xform_matrix[flip_row_index][i]
 
-# TODO: a function to setup a full image layer. this should follow pretty closely as the write_three_layer json function
-# this would allow us to generalize up to N-dimensions, making color images trivial (??? probably still not trivial)
-def setup_layer():
     pass
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
@@ -240,41 +237,40 @@ def setup_layer():
 # TODO: color images are currently ignored
 def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str, label_nhdr_file: str, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
+        inputs:
+        data_file -- name of the root folder of data file, as it sits on S3
+        label_file -- name of the root folder of label file, as it sits on S3
+        data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
+        label_nhdr -- analogous to data_nhdr for label_file
+        output_file -- the freshscreen display json file to eventually write to.
+        json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
+            - current template was copied from N58204NLSAM_dwi
+        data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
 
-    inputs:
-    data_file -- name of the root folder of data file, as it sits on S3
-    label_file -- name of the root folder of label file, as it sits on S3
-    data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
-    label_nhdr -- analogous to data_nhdr for label_file
-    output_file -- the freshscreen display json file to eventually write to.
-    json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
-        - current template was copied from N58204NLSAM_dwi
-    data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
-
-    returns a dict that represents the json file. DON'T (???) have this one also write it to a file. make another function decide where to put it
-    # actually it is not really necessary to save this as a json file. instead it could return the url encoded string? unsure. does not matter right now
+        returns a dict that represents the json file. DON'T (???) have this one also write it to a file. make another function decide where to put it
+        # actually it is not really necessary to save this as a json file. instead it could return the url encoded string? unsure. does not matter right now
 
 
-    assumptions:
-    - the data is stored on the d3mof5o AWS S3 bucket and follows all freshscreen organization conventions
-    - file (actually a directory) ends in .precomputed or .n5. will infer which one it is based on the extension
+        assumptions:
+        - the data is stored on the d3mof5o AWS S3 bucket and follows all freshscreen organization conventions
+        - file (actually a directory) ends in .precomputed or .n5. will infer which one it is based on the extension
 
-    - layer[0] is orientation label
-    - layer[1] is image volume
-    - layer[2] is segmentation volume
-    """
+        - layer[0] is orientation label
+        - layer[1] is image volume
+        - layer[2] is segmentation volume"""
+
     """function to write json for our most typical use case: three layers
         1) the contrast of interest
             different for each contrast
             need to update:
-                 filepath
-                 contrast window/range
-                 transform matrix
-                 input/output dimensions (out_dims should always be MRI resolution)
-                 name
-                 opacity -- ?
-                 shader - volume only
-                 shader controls - volume only
+                filepath
+                contrast window/range
+                transform matrix
+                input/output dimensions (out_dims should always be MRI resolution)
+                name
+                opacity -- ?
+                shader - volume only
+                shader controls - volume only
         2) labelset
             one for each SPECIMEN. should be the same parameters for all (except origin transform)
         3) orientation label
@@ -286,14 +282,11 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         json_template = pathjoin(dirname, json_template)
         logging.info(dirname)
 
-    # .lower() converts string to all lowercase
-    if "color" in get_contrast_from_filename(data_file).lower():
-        logging.warning("Color files are not currently supported. Make this one manually.")
-        return None
-
     if data_threshold_max is None:
         pass
 
+    # starting point is a representative template file
+    # we load that in as a dict and edit the fierlds accordingly
     data = None
     with open(json_template) as template:
         data = json.load(template)
@@ -301,60 +294,30 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         logging.warning("Unable to read template file: {}".format(json_template))
         return None
 
+    # these are dicts representing the local data
+    """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
+        space directions = transform matrix (with embedded voxel size in mm)
+        space origin = origin translation in mm
+        type = data type
+        dimension = 3 (or more for COLOR)
+        space = "left-posterior-superior" -- will give us hints on where to throw negatives
+        sizes = array of num voxels in each dimension
+        kinds = "domain domain domain" (different for COLOR)
+        endian = big or little (usually little)
+        encoding = raw or gzip
+        data file = not used here -- could start EVERYTHING from the nhdr, including naming the neuroglancer file...? hmmm"""
+    #data_nhdr = nrrd.read_header(data_nhdr_file)
+    #label_nhdr = nrrd.read_header(label_nhdr_file)
+
+    # i calculate these also in setup_one_image_layer, but i also need them for other things...
+    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
+
     ###**************####
     # edit image layer
     ###**************####"
     # data["layers"][1] is the image volume
-    image_layer = data["layers"][1]
-    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file)
-
-    # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
-
-    """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
-    space directions = transform matrix (with embedded voxel size in mm)
-    space origin = origin translation in mm
-    type = data type
-    dimension = 3 (or more for COLOR)
-    space = "left-posterior-superior" -- will give us hints on where to throw negatives
-    sizes = array of num voxels in each dimension
-    kinds = "domain domain domain" (different for COLOR)
-    endian = big or little (usually little)
-    encoding = raw or gzip
-    data file = not used here -- could start EVERYTHING from the nhdr, including naming the neuroglancer file...? hmmm"""
-    data_nhdr = nrrd.read_header(data_nhdr_file)
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
-        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
-        i+=1
-    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-
-    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
-    # TODO: this is almost identical to above 6 lines. functionize?
-        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
-        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
-
-
-    # update shader controls (default window and level)
-    # range is range of data to be rendered on screen
-    # window is range of the slider the user can use to edit the range in the GUI
-    (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
-    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
-    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
-    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
-
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
-    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
+    image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr)
 
     ###**************####
     # edit rCCF label layer
@@ -365,6 +328,8 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
     rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
 
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
+
     # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
     i = 0
     for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
@@ -372,8 +337,6 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         i+=1
     logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
 
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
     i = 0
     for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
         rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
@@ -391,14 +354,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     data["selectedLayer"]["layer"] = image_layer["name"]
     data["selectedLayer"]["visible"] = True
 
-    eps=1e-15
-    scale_factor = 2
-    if abs(abs(data_voxel_sizes[0]) - 0.000015) < eps:
-        scale_factor = 2
-    if abs(abs(data_voxel_sizes[0]) - 0.000045) < eps:
-        scale_factor = 0.8
-    data["crossSectionScale"] = scale_factor
-    logging.info("setting scale factor to: {}".format(scale_factor))
+    data["crossSectionScale"] = get_crossSectionScale_factor(data_voxel_sizes[0])
 
 
 
@@ -439,167 +395,35 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         logging.warning("Unable to read template file: {}".format(json_template))
         return None
 
-
-    # NOTE that order matters here!
-        # in the color_template.json file I have hard-coded in the shader code to display red for channel 0, green (1), and blue (2)
-        # if this order is not respected, then color channels will be swapped
-    ###**************####
-    # edit image layer -- RED
-    ###**************####"
-    image_layer = data["layers"][0]
-    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix="setup0/timepoint0/")
-
-    # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
-
-    """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
-    space directions = transform matrix (with embedded voxel size in mm)
-    space origin = origin translation in mm
-    type = data type
-    dimension = 3 (or more for COLOR)
-    space = "left-posterior-superior" -- will give us hints on where to throw negatives
-    sizes = array of num voxels in each dimension
-    kinds = "domain domain domain" (different for COLOR)
-    endian = big or little (usually little)
-    encoding = raw or gzip
-    data file = not used here -- could start EVERYTHING from the nhdr, including naming the neuroglancer file...? hmmm"""
     data_nhdr = nrrd.read_header(data_nhdr_file)
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
-        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
-        i+=1
-    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-
-    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
-    # TODO: this is almost identical to above 6 lines. functionize?
-        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
     label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
-        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
-
-    # update shader controls (default window and level)
-    # range is range of data to be rendered on screen
-    # window is range of the slider the user can use to edit the range in the GUI
-    # TODO: also define a minimum range for each contrast value
-    (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
-    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
-    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
-    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
-
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
-    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
+    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
 
     ###**************####
-    # edit image layer --  GREEN
-    ###**************####"
-    image_layer = data["layers"][1]
-    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix="setup1/timepoint0/")
-
-    # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
-
-    data_nhdr = nrrd.read_header(data_nhdr_file)
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
-        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
-        i+=1
-    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-
-    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
-    # TODO: this is almost identical to above 6 lines. functionize?
-        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
-        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
-
-    # update shader controls (default window and level)
-    # range is range of data to be rendered on screen
-    # window is range of the slider the user can use to edit the range in the GUI
-    (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
-    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
-    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
-    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
-
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
-    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
-
+    # edit image layers
     ###**************####
-    # edit image layer -- BLUE
-    ###**************####"
-    image_layer = data["layers"][2]
-    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix="setup2/timepoint0/")
-
-    # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
-
-    data_nhdr = nrrd.read_header(data_nhdr_file)
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
-        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
-        i+=1
-    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-
-    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
-    # TODO: this is almost identical to above 6 lines. functionize?
-        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
-        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
-
-    # update shader controls (default window and level)
-    # range is range of data to be rendered on screen
-    # window is range of the slider the user can use to edit the range in the GUI
-    (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
-    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
-    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
-    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
-
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
-    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
-
+    # replacement for the above mess
+    # layer 0 is red, 1 is green, 2 is blue
+    # these are according to the template file neroglancer_json_templates/color_template.json
+    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr)
+    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr)
+    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
-    # TODO: add more functions. this looks almost identical to code above
-    # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
+    # TODO: can i make the label layer setup work within the image layer setup scheme?
     rccf_label_layer = data["layers"][4]
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
     rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
 
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
     # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
     i = 0
     for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
         rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
         i+=1
     logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
-
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
     i = 0
     for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
         rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
@@ -614,21 +438,11 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     ###*******####
     # make the image layer be the default control panel that shows
     # TODO: this does not work. really don't understand why
-    data["selectedLayer"]["layer"] = image_layer["name"]
+    data["selectedLayer"]["layer"] = red_image_layer["name"]
     data["selectedLayer"]["visible"] = True
 
-    # determines how zoomed in it is
-        # found 2 works well for 15um data
-        # 0.6 works well for 45um
-        # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
-    eps=1e-15
-    scale_factor = 2
-    if abs(abs(data_voxel_sizes[0]) - 0.000015) < eps:
-        scale_factor = 2
-    if abs(abs(data_voxel_sizes[0]) - 0.000045) < eps:
-        scale_factor = 0.8
-    data["crossSectionScale"] = scale_factor
-    logging.info("setting scale factor to: {}".format(scale_factor))
+    # set global camera zoom level
+    data["crossSectionScale"] = get_crossSectionScale_factor(data_voxel_sizes[0])
 
 
     # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
@@ -647,7 +461,64 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
     # who should be responsible for choosing that name?
     write_freshscreen_display_json(data, data_file, output_file)
-    #url = convert_json_to_url(convert_dict_to_string(data))
+
+def get_crossSectionScale_factor(voxel_size):
+    # crossSectionScale is a "global" variable to each neuroglancer scene
+    # determines how zoomed in it is 
+        # found 2 works well for 15um data
+        # 0.6 works well for 45um
+        # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
+    eps=1e-15
+    scale_factor = 1
+    if abs(abs(voxel_size) - 0.000015) < eps:
+        scale_factor = 2
+    if abs(abs(voxel_size) - 0.000045) < eps:
+        scale_factor = 0.8
+    logging.info("setting scale factor to: {}".format(scale_factor))
+    return scale_factor
+
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX):
+    """sets up one data layer in a neuroglancer scene
+    call this one for a typical scene with one volume
+    called three times for color images (1x per channel)
+    """
+    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix)
+
+    # edit the layer name
+    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
+
+    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
+    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
+    i = 0
+    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
+        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
+        i+=1
+    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
+
+    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
+    # TODO: this is almost identical to above 6 lines. functionize?
+        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
+    i = 0
+    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
+        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
+        i+=1
+    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
+
+
+    # update shader controls (default window and level)
+    # range is range of data to be rendered on screen
+    # window is range of the slider the user can use to edit the range in the GUI
+    (min_range,max_range) = get_default_threshold(data_file)
+    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
+    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
+    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
+    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
+
+    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
+    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
+
+    return image_layer
 
 # also take in the data_file name because it is available to pass, and it is "obfuscated" within the data dict by the N5_PREFIX/PRECOMPUTED_PREFIX
 def write_freshscreen_display_json(data: dict, data_file: str, output_file: str, display_name: str=None):
@@ -778,6 +649,11 @@ def pathjoin(*args):
     """takes a list of path components and joins them together with forward slashes as the separator
     this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
     return "/".join(args)
+
+def read_nhdr_from_s3(n5_file: str):
+    """takes as input an n5 file found within s3 (as we are looping over them). tries to find the corresponding nhdr file on s3 and returns a pynrrd dict"""
+    pass 
+
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
