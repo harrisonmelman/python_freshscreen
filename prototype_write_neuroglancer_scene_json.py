@@ -25,6 +25,7 @@ import nrrd
 import numpy as np
 import functools
 import glob
+import subprocess
 # header = nrrd.read_header('output.nrrd') # possible to only read the nrrd header
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
@@ -37,6 +38,7 @@ PRECOMPUTED_PREFIX = "precomputed://https://d3mof5o.s3.amazonaws.com"
 # this is needed at the end of all N5 file paths, to tell neuroglancer where the data lives in the folder struct
 N5_SUFFIX="setup0/timepoint0/"
 LIGHTSHEET_CONTRASTS = ["NeuN", "autof", "Thy1", "MBP", "ChAT"]
+RCLONE = "K:/DevApps/rclone-v1.58.1-windows-amd64/rclone.exe"
 
 # a class to allow json to encode assorted numpy data types
 class NpEncoder(json.JSONEncoder):
@@ -62,7 +64,7 @@ def get_runno_from_filename(filename: str):
     for guess in f:
         if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
             return guess
-    logging.warning("unable to find specimen run number from the filename: {}".format(filename))
+    logging.warning("unable to find specimen run number from the filename: {}\n\t assuming you want to use: {}".format(filename. f[-2]))
     return f[-2]
     #return None
 
@@ -81,6 +83,7 @@ def get_default_threshold(filename: str):
     DEFAULT_THRESHOLDS = {
         "dwi" : (0,25000),
         "fa" : (0,1),
+        "nqa": (0,1),
         "ad" : (0,0.8),
         "rd" : (0,0.8),
         "md" : (0,0.8),
@@ -100,7 +103,7 @@ def get_default_threshold(filename: str):
         "nqa-color" : (0,100),
         "gqi-color" : (0,100),
         "tdi-color" : (0,100),
-        "tdi3-color" : (0,100)
+        "tdi3-color" : (0,20)
     }
     # no idea if this will work as expected or not...
     d17gaj40_THRESHOLDS = {
@@ -230,12 +233,10 @@ def flip_xform_dimension(xform_matrix: dict, dim: int=2):
     for i in range(len(xform_matrix[flip_row_index])):
         xform_matrix[flip_row_index][i] = -1 * xform_matrix[flip_row_index][i]
 
-    pass
-
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
 # TODO: color images are currently ignored
-def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str, label_nhdr_file: str, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
+def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -378,7 +379,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
 
 # starting as a direct copy of write_three_layer_json
 # mostly will be the same, just have two extra data layers to handle
-def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label_nhdr_file: str, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None):
+def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -395,8 +396,8 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
         logging.warning("Unable to read template file: {}".format(json_template))
         return None
 
-    data_nhdr = nrrd.read_header(data_nhdr_file)
-    label_nhdr = nrrd.read_header(label_nhdr_file)
+    #data_nhdr = nrrd.read_header(data_nhdr_file)
+    #label_nhdr = nrrd.read_header(label_nhdr_file)
     data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
 
     ###**************####
@@ -405,9 +406,9 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
     # replacement for the above mess
     # layer 0 is red, 1 is green, 2 is blue
     # these are according to the template file neroglancer_json_templates/color_template.json
-    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr)
-    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr)
-    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr)
+    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0")
+    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0")
+    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0")
 
     ###**************####
     # edit rCCF label layer
@@ -464,12 +465,12 @@ def write_color_json(data_file: str, label_file: str, data_nhdr_file: str, label
 
 def get_crossSectionScale_factor(voxel_size):
     # crossSectionScale is a "global" variable to each neuroglancer scene
-    # determines how zoomed in it is 
+    # determines how zoomed in it is
         # found 2 works well for 15um data
         # 0.6 works well for 45um
         # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
     eps=1e-15
-    scale_factor = 1
+    scale_factor = 2
     if abs(abs(voxel_size) - 0.000015) < eps:
         scale_factor = 2
     if abs(abs(voxel_size) - 0.000045) < eps:
@@ -545,11 +546,46 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
     organization_json["view_neuroglancerURL"] = convert_json_to_url(convert_dict_to_string(data))
     write_dict_to_json_file(output_file, organization_json)
 
-# TODO: boto3 is an aws sdk for python. but it is confusing
-def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir: str, label_file: str=None):
+def pathjoin(*args):
+    """takes a list of path components and joins them together with forward slashes as the separator
+    this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
+    return "/".join(args)
+
+def find_nhdr_file(n5_file: str):
+    """takes as input an n5 file found within s3 (as we are looping over them). tries to find the corresponding nhdr file on s3
+        if it cannot find one on s3, then try to find one locally, with the optional argument nhdr_dir
+        returns a pynrrd dict"""
+    code_dir = os.path.dirname(os.path.realpath(__file__)).replace("\\","/")
+    nhdr_file_name = n5_file.replace(".n5", "_M4D.nhdr")
+    if "color" in nhdr_file_name:
+        # then search my s3 file list for the dwi, and use that
+        # BUT if your n5 is a tdix3 or x5, then you need to divide your voxel sizes
+        cmd_str="grep dwi {}/temp/subprocess_output".format(code_dir)
+        a=subprocess.run(cmd_str, capture_output=True)
+        nhdr_file_name = a.stdout.decode("utf-8")
+    out_dir = "{}/data/nhdr_cache".format(code_dir)
+    cmd_str="{} copy freshscreen:d3mof5o/{} {}/".format(RCLONE, nhdr_file_name, out_dir)
+    subprocess.run(cmd_str)
+
+    # if you fail to find the nhdr on s3, then what?
+    # here is how i was finding things locally. maybe do that. maybe just fail and yell at user
+#        data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
+#        if len(data_nhdr_file) == 0:
+#            # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
+#            data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}*.nhdr".format(spec_id, contrast)))
+#        if len(data_nhdr_file) != 1:
+#            logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr_file))
+#            continue
+#            #exit()
+#        # WARNING: glob still throws backslashes in...
+#            # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
+#        data_nhdr_file = data_nhdr_file[0].replace("\\","/")
+
+    nhdr = nrrd.read_header("{}/{}".format(out_dir, nhdr_file_name))
+    return nhdr
+
+def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
-    import subprocess
-    rclone = "K:/DevApps/rclone-v1.58.1-windows-amd64/rclone.exe"
 
     spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
     # on windows i had to split this up because pipes are playing funny (read: not working). do not fully understand why.
@@ -557,11 +593,11 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
     # i think that i need to do with open... several times because i am usig the command line to read from the file (with grep and awk). python having the file open locks it from other prying eyes. there MIGHT(??) be a work around to this
     # this is the full command as you would run it on the command line
     # TODO: also, subprocess.run takes stdin as an argument. i am supposed to be able to pass a file handle to it, but that isn't working. that might be mroe reliable then what i am currently doing+
-    #cmd_str="{} lsd freshscreen:d3mof5o | grep {} | awk '{{print $5}}'".format(rclone, spec_id_fresh)
+    #cmd_str="{} lsd freshscreen:d3mof5o | grep {} | awk '{{print $5}}'".format(RCLONE, spec_id_fresh)
 
-    cmd_str="{} lsd freshscreen:d3mof5o".format(rclone)
+    cmd_str="{} lsd freshscreen:d3mof5o".format(RCLONE)
     a=subprocess.run(cmd_str, shell=True, capture_output=True)
-    temp_file_list = "K:/workstation/code/display/python_freshscreen/data/temp/subprocess_output"
+    temp_file_list = "{}/data/temp/subprocess_output".format(os.path.dirname(os.path.realpath(__file__)).replace("\\","/"))
     with open(temp_file_list, "w+b") as f:
         f.write(a.stdout)
 
@@ -593,40 +629,55 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         if not f or f is None:
             continue
         # extract run number and contrast to find the nhdr
-        runno = f.split("_")[2]
+        #runno = f.split("_")[2]
+        runno = get_runno_from_filename(f)
         contrast = get_contrast_from_filename(f)
 
-        # this is a DIRTY HACK, we do not always have good nhdrs for color (and rn we have merged color niftis that are a pain and a half to create a nhdr for)
-            #BUT we only use the nhdr file to grab metadata such as dimensions and transform matrix
-            # do not use contrast type or data file from the nhdr so we do not (necessarily) need the correct nhdr, as long as it is from the same specimen
-            # i think this is safe because the other times we use contrast (like calculating threshold) we make another query to get_contrast_from_filename, so it will revert back to nqa-color then
-        if "color" in contrast.lower():
+        if "color" in f.lower():
+            # then we take the dwi nhdr and use that
+            # the transform matrix will still be valid but voxel sizes NOT NECESSARILY
+            # below we account for voxel size difference in tdi3 and tdi5 file
             contrast="dwi"
 
         data_file = f
-        data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
-        if len(data_nhdr) == 0:
+        data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
+        if len(data_nhdr_file) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
-            data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*_{}*.nhdr".format(spec_id, contrast)))
-        if len(data_nhdr) != 1:
-            logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr))
+            data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}*.nhdr".format(spec_id, contrast)))
+        if len(data_nhdr_file) != 1:
+            logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr_file))
             continue
             #exit()
         # WARNING: glob still throws backslashes in...
             # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
-        data_nhdr = data_nhdr[0].replace("\\","/")
+        data_nhdr_file = data_nhdr_file[0].replace("\\","/")
+        if not os.path.isfile(data_nhdr_file):
+            logging.error("cannot find data nhdr locally: {}".format(data_nhdr_file))
+            exit()
+        data_nhdr = nrrd.read_header(data_nhdr_file)
+        if "color" in f.lower():
+            if "tdi3" in f.lower():
+                data_nhdr["space directions"] = data_nhdr["space directions"] / 3
+            if "tdi5" in f.lower():
+                data_nhdr["space directions"] = data_nhdr["space directions"] / 5
 
-        label_nhdr = glob.glob(pathjoin(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)))
-        if len(label_nhdr) == 0:
+        label_nhdr_file = glob.glob(pathjoin(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)))
+        if len(label_nhdr_file) == 0:
             logging.error("cannot find a relevant label nhdr file for {}.".format(spec_id))
             exit()
-        label_nhdr = label_nhdr[0].replace("\\","/")
-        if not os.path.isfile(label_nhdr):
-            logging.error("cannot find label file nhdr locally: {}".format(label_nhdr))
+        label_nhdr_file = label_nhdr_file[0].replace("\\","/")
+        if not os.path.isfile(label_nhdr_file):
+            logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
             exit()
-        if not os.path.isfile(data_nhdr):
-            logging.error("cannot find data nhdr locally: {}".format(data_nhdr))
-            exit()
+        # TODO: find label nhdr on freshscreen
+            # WAIT A SECOND we never upload labels.nhdr files
+            # oops......not sure what to do about this one.
+        label_nhdr = nrrd.read_header(label_nhdr_file)
+        # above is replaced by a new funciton that finds the nhdr based on n5 file, in s3
+        # cant make this work rn...
+        # TODO:
+        #   data_nhdr = find_nhdr_file(data_file)
+        # what about label file???
 
         if contrast in LIGHTSHEET_CONTRASTS:
             # lightsheet volumes are saved locally with spec id instead of runno in the filename
@@ -635,25 +686,16 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
             # i think this if statement is NEVER reachable
             if contrast in "mGRE":
                 contrast = "mAVG"
-            data_nhdr = pathjoin(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast))
+            data_nhdr_file = pathjoin(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast))
 
         output_file = pathjoin(output_dir, "{}.json".format(f))
-        logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr = {}\n\t label_file = {}\n\t label_nhdr = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr, label_file, label_nhdr, output_file))
+        logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr_file, label_file, label_nhdr_file, output_file))
+        #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file,  label_file, label_nhdr_file, output_file))
 
         if "color" in f.lower():
             write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
             continue
         write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
-
-def pathjoin(*args):
-    """takes a list of path components and joins them together with forward slashes as the separator
-    this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
-    return "/".join(args)
-
-def read_nhdr_from_s3(n5_file: str):
-    """takes as input an n5 file found within s3 (as we are looping over them). tries to find the corresponding nhdr file on s3 and returns a pynrrd dict"""
-    pass 
-
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
@@ -670,13 +712,10 @@ def main():
             nhdr_dir = sys.argv[3]
             output_dir = sys.argv[4]
         else:
-            #nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
             nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
-            #output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        loop_through_specimen_in_freshscreen(specimen_id, nhdr_dir, output_dir)
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
-
 main()
