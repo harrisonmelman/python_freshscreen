@@ -20,6 +20,7 @@ import urllib.parse
 import json
 import logging
 import os
+import re
 import sys
 import nrrd
 import numpy as np
@@ -50,8 +51,26 @@ class NpEncoder(json.JSONEncoder):
         elif isinstance(obj, np.bool_):
             return bool(obj)
         return super(NpEncoder, self).default(obj)
+def get_fsname_from_fsfile(filename: str):
+    _, filename = os.path.split(filename)
+    match = re.match(r'(.+?)(_M4D)?\.(.+)', filename)
 
+    if match is not None:
+        fsname = match.group(1)
+        inner_match = re.match(r'^(.+?)_N[0-9]+_(.+?)$', fsname)
+
+        if inner_match is not None:
+            parts = inner_match.group(2).split('_')
+
+            if len(parts) >= 2:
+                return parts[0]
+
+            return inner_match.group(1)
+
+    # Return a default value or handle the case where no match is found
+    return "default_fsname"
 def get_runno_from_filename(filename: str):
+    _,filename = os.path.split(filename)
     f = filename.split("_")
     # run number should always be the second to last field in the freshscreen name
     guess = f[-2]
@@ -62,13 +81,14 @@ def get_runno_from_filename(filename: str):
     for guess in f:
         if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
             return guess
-    logging.warning("unable to find specimen run number from the filename: {}".format(filename))
+    logging.warning("unable to find specimen run number from the filename: {} parts: {} chosen: {}".format(filename, f, f[-2]))
     return f[-2]
     #return None
 
 def get_contrast_from_filename(filename: str):
     #return filename.split("_")[-1].split(".")[0]
     # dirty fix for a couple of the lightsheet volumes endinging in -ls on freshscreen
+    _,filename = os.path.split(filename)
     return filename.split("_")[-1].split(".")[0].split("-")[0]
 
 def get_default_threshold(filename: str):
@@ -83,6 +103,13 @@ def get_default_threshold(filename: str):
         "md" : 0.8, #0.4, #0.02,
         "qa" : 1,
         "gfa" : 1,
+        "iso" : 1,
+        "m0" : 1,
+        "m1" : 1,
+        "m2" : 1,
+        "m3" : 1,
+        "mGRE" : 1,
+        "nqa" : 1,
         "color" : 128,
         "NeuN" : 800,
         "MBP" : 1300,
@@ -90,10 +117,23 @@ def get_default_threshold(filename: str):
         "Thy1" : 1500,
         "IBA1" : 1300,
         "Syto16" : 1300,
+        "SST" : 1300,
+        "NFH" : 1300,
+        "PV" : 1300,
+        "Lectin" : 1300,
+        "TH" : 1300,
+        "DBH" : 1300,
+        "GAD67" : 1300,
+        "CD31" : 1300,
+        "Calbindin" : 1300,
+        "ChAT" : 1300,
+        "VIP" : 1300,
+        "NPY" : 1300,
         "tdi" : 20,
         "tdi3" : 20,
         "tdi5" : 20,
-        "b0" : 30000
+        "b0" : 30000,
+        "CT" : 2000
     }
 
     d17gaj40_THRESHOLDS = {
@@ -112,8 +152,8 @@ def get_default_threshold(filename: str):
     # split on "_" and take the last one
     # split on "." to remove the file extension
     contrast = get_contrast_from_filename(filename)
-    #return DEFAULT_THRESHOLDS[contrast]
-    return d17gaj40_THRESHOLDS[contrast]
+    return DEFAULT_THRESHOLDS[contrast]
+    #return d17gaj40_THRESHOLDS[contrast]
 
 def convert_dict_to_string(data: dict):
     return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
@@ -266,12 +306,12 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
             one for each SPECIMEN. should be the same parameters for all (except origin transform)
         3) orientation label
             will always be the same file. placement might be a pain"""
-
+    _,data_file = os.path.split(data_file)
+    _,label_file = os.path.split(label_file)
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
         json_template = pathjoin(dirname, json_template)
-        print(dirname)
 
     # .lower() converts string to all lowercase
     if "color" in get_contrast_from_filename(data_file).lower():
@@ -287,16 +327,25 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     if data is None:
         logging.warning("Unable to read template file: {}".format(json_template))
         return None
-
+    if label_nhdr_file is None:
+        logging.error("Error: label_nhdr_file is None. Ensure label_nhdr_file is properly set.")
+        return None
+    if os.path.exists(label_nhdr_file):
+        label_nhdr = nrrd.read_header(label_nhdr_file)
+        # Continue with the rest of your code that uses label_nhdr
+    else:
+        logging.error(f"Error: label_nhdr_file does not exist: {label_nhdr_file}")
+        return None
     ###**************####
     # edit image layer
     ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
+    # This is returning the Neuroglancer url file path (image source) not looking/finding it in S3
     image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file)
 
-    # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
+    # edit the layer name  TODO: better way to get this information
+    image_layer["name"] = "{} {}".format(get_fsname_from_fsfile(data_file), get_contrast_from_filename(data_file))
 
     """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
     space directions = transform matrix (with embedded voxel size in mm)
@@ -349,7 +398,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
     rccf_label_layer = data["layers"][2]
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
-    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
+    rccf_label_layer["name"] = "{} {}".format(get_fsname_from_fsfile(label_file), get_contrast_from_filename(label_file))
 
     # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
     i = 0
@@ -358,8 +407,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
         i+=1
     logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
 
-    label_nhdr = nrrd.read_header(label_nhdr_file)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
+
     i = 0
     for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
         rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
@@ -451,6 +499,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         f.write(a.stdout)
 
     filelist = a.stdout.decode("utf-8").split("\n")
+    #print("label file function input: {}".format(label_file))
     if label_file is None:
         # if user does not provide label file, loop through s3 bucket to try and find it. returns if cannot find
         for f in filelist:
@@ -460,6 +509,9 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
         if label_file is None:
             logging.warning("cannot find a label file in s3 for specimen {}".format(spec_id_fresh))
             return None
+    # this is not where we are callinh write_tjhree_layer_json at least in this use case. check prepare1image
+    #print("found label file is: {}".format(label_file))
+    #exit()
     for f in filelist:
         if "color" in f.lower():
             logging.warning("color images not currently supported")
@@ -476,7 +528,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, nhdr_dir:str, output_dir:
 
         data_file = f
         data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
-        print(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
+        print('nhdr_dir', pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(runno, contrast)))
         if len(data_nhdr) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
             data_nhdr = glob.glob(pathjoin(nhdr_dir, "*{}*{}*.nhdr".format(spec_id, contrast)))
@@ -540,5 +592,26 @@ def main():
         loop_through_specimen_in_freshscreen(specimen_id, nhdr_dir, output_dir)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
-
-main()
+if __name__ == "__main__":
+  main()
+'''
+def main():
+    logging.getLogger().setLevel(logging.INFO)
+    if len(sys.argv) > 2:
+        # i am not even using project_code
+        project_code = sys.argv[1]
+        specimen_id = sys.argv[2]
+        if len(sys.argv) > 4:
+            # then I do not want to use the typical R drive organization, instead pass an nhdr_dir(input) and out_dir
+            nhdr_dir = sys.argv[3]
+            output_dir = sys.argv[4]
+        else:
+            #nhdr_dir = "/Volumes/PWP-CIVM-CTX01/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
+            #output_dir = "U:/freshscreen_n5_library/to_S3/jsonfiles"
+        # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
+        loop_through_specimen_in_freshscreen(specimen_id, nhdr_dir, output_dir)
+    else:
+        logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
+        '''

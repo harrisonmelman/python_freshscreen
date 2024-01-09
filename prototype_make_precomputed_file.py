@@ -18,17 +18,26 @@ import logging
 
 # TODO: create a generalized function for this that takes as input the unit to return as
 def get_voxel_size_from_nhdr_dict_in_nanometers(nhdr: dict):
-    """Determines the voxel size (in meters) of an image given the nhdr file as an OrderedDict (already read into an object by nrrd.read_nhdr)
-    does not assume isotropic volumes. returns the voxel size of each dimension as an array"""
-    nhdr["space directions"]
-    sizes = []
-    n_dims = nhdr["space directions"].shape[0]
-    for i in range(n_dims):
-        size = max(abs(nhdr["space directions"][i]))
-        # conversion from mm to nanometers
-        size = int(size * 1000 * 1000)
-        sizes.append(size)
-    return sizes
+	"""Determines the voxel size (in meters) of an image given the nhdr file as an OrderedDict (already read into an object by nrrd.read_nhdr)
+	does not assume isotropic volumes. returns the voxel size of each dimension as an array"""
+	sizes = []
+	n_dims = nhdr["space directions"][0]
+	print("n_dims = {}".format(n_dims))
+	print(type(n_dims))
+
+	try:
+		n_dims = nhdr["space directions"].shape[0]
+	except:
+		n_dims = nhdr["spacedirections"].shape[0]
+	for i in range(n_dims):
+		try:
+			size = max(abs(nhdr["space directions"][i]))
+		except:
+			size = max(abs(nhdr["spacedirections"][i]))
+		# conversion from mm to nanometers
+		size = int(size * 1000 * 1000)
+		sizes.append(size)
+	return sizes
 
 def make_precomputed(nhdr_file: str, out_file: str):
 	readdata, header = nrrd.read(nhdr_file)
@@ -37,6 +46,7 @@ def make_precomputed(nhdr_file: str, out_file: str):
 	readdata=readdata.astype(np.uint64)
 	print(readdata.shape)
 	print(header)
+	print("MAKE PRECOMPUTED: {}".format(out_file))
 
 	# sizes: 813 1317 613
 	info = CloudVolume.create_new_info(
@@ -67,7 +77,6 @@ def make_precomputed(nhdr_file: str, out_file: str):
 	#vol = CloudVolume('file://{}/N57205NLSAM_RCCF_labels.precomputed'.format(data_dir), info=info)
 	vol = CloudVolume('file://{}'.format(out_file), info=info)
 
-
 	# info (dict, rw) - Python dict representation of Neuroglancer info JSON file. You must call vol.commit_info() to save your changes to storage.
 	vol.commit_info()
 	#vol.provenance.description = "Description of Data"
@@ -76,17 +85,20 @@ def make_precomputed(nhdr_file: str, out_file: str):
 
 def downsample(precomputed_file: str, tq):
 	layer_path = 'file://{}'.format(precomputed_file)
+	print("downsampling: {}".format(layer_path))
 	tasks = tc.create_downsampling_tasks(layer_path, mip=0, axis="z", num_mips=4, preserve_chunk_size=True, encoding="raw", background_color=0, compress=None)
 	tq.insert(tasks)
 	tq.execute()
 
 def mesh(precomputed_file: str, tq):
 	layer_path = 'file://{}'.format(precomputed_file)
+	print("meshing on: {}".format(layer_path))
 	tasks = tc.create_meshing_tasks(layer_path, mip=2, progress=True, compress=None)
 	tq.insert(tasks)
 	tq.execute()
 
 def gunzip_all_chunks(precomputed_file: str):
+	print("GUNZIP ALL CHUNKS ON: {}".format(precomputed_file))
 	run("gunzip {}/*/*gz ".format(precomputed_file), shell=True)
 
 class NpEncoder(json.JSONEncoder):
@@ -102,6 +114,7 @@ class NpEncoder(json.JSONEncoder):
         return super(NpEncoder, self).default(obj)
 
 def add_lookup_table(precomputed_file: str, lookup_table_template: str):
+	print("ADDING LOOKUP TABLE TO: {}\n   using lookuptable template: {}".format(precomputed_file,lookup_table_template))
 	# lookup table will always be the same.
 	src = lookup_table_template
 	dst_dir = pathjoin(precomputed_file, "segment_properties")
@@ -146,23 +159,28 @@ precomputed_file = "{}/{}_{}_RCCF_labels.precomputed".format(data_dir, spec_id_f
 """
 ##****#*#*#*#*#*#
 ## MAIN
+def make_precomputed_file(nhdr_file, precomputed_file, label_type):
+  # THIS IS FOR RCCF ONLY
+  # MAKE NEW ONE FOR WHS
+  lookup_table_template = "/Users/harry/scratch/neuroglancer_python_prototype/data/segment_properties/{}/info".format(label_type)
 
-if len(sys.argv) > 2:
-	nhdr_file = sys.argv[1]
-	precomputed_file = sys.argv[2]
-	label_type = sys.argv[3]
+  print(nhdr_file)
+  print(precomputed_file)
 
-# THIS IS FOR RCCF ONLY
-# MAKE NEW ONE FOR WHS
-lookup_table_template = "/Users/harry/scratch/neuroglancer_python_prototype/data/segment_properties/{}/info".format(label_type)
+  make_precomputed(nhdr_file, precomputed_file)
 
-print(nhdr_file)
-print(precomputed_file)
+  tq = LocalTaskQueue(parallel=8)
+  downsample(precomputed_file, tq)
+  mesh(precomputed_file, tq)
+  gunzip_all_chunks(precomputed_file)
+  add_lookup_table(precomputed_file, lookup_table_template)
 
-make_precomputed(nhdr_file, precomputed_file)
+def main():
 
-tq = LocalTaskQueue(parallel=8)
-downsample(precomputed_file, tq)
-mesh(precomputed_file, tq)
-gunzip_all_chunks(precomputed_file)
-add_lookup_table(precomputed_file, lookup_table_template)
+  if len(sys.argv) > 2:
+    nhdr_file = sys.argv[1]
+    precomputed_file = sys.argv[2]
+    label_type = sys.argv[3]
+    make_precomputed_file(nhdr_file, precomputed_file, label_type)
+if __name__ == "__main__":
+  main()
