@@ -89,7 +89,12 @@ def get_contrast_from_filename(filename: str):
     #return filename.split("_")[-1].split(".")[0]
     # dirty fix for a couple of the lightsheet volumes endinging in -ls on freshscreen
     _,filename = os.path.split(filename)
-    return filename.split("_")[-1].split(".")[0].split("-")[0]
+    # this old logic would strip off -color from gqi-color and tdi3-color
+    # UNSURE of the consequences from this. change it back or yell at harrison if you see new errors
+    #contrast = filename.split("_")[-1].split(".")[0].split("-")[0]
+    contrast = filename.split("_")[-1].split(".")[0]
+    print("extracting contrast from filename: {} \n\tcontrast = {}".format(filename, contrast))
+    return contrast
 
 def get_default_threshold(filename: str):
     """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
@@ -108,7 +113,8 @@ def get_default_threshold(filename: str):
         "m1" : 1,
         "m2" : 1,
         "m3" : 1,
-        "mGRE" : 1,
+        "mGRE" : 30000,
+        "mGRE-unmasked" : 30000,
         "nqa" : 1,
         "color" : 128,
         "NeuN" : 800,
@@ -129,11 +135,12 @@ def get_default_threshold(filename: str):
         "ChAT" : 1300,
         "VIP" : 1300,
         "NPY" : 1300,
+        "Thy1-YFP" : 1300,
         "tdi" : 20,
         "tdi3" : 20,
         "tdi5" : 20,
         "b0" : 30000,
-        "CT" : 2000
+        "CT" : 5000
     }
 
     d17gaj40_THRESHOLDS = {
@@ -249,6 +256,17 @@ def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_siz
         temp = nhdr_dict["space origin"][i] / label_voxel_sizes[i] / 1000
         xform_matrix[i][-1] = temp
 
+    # ABOVE NO LONGER CORRECT FOR DMBA DATA
+    # this puts the volume origin at the center of the neuroglancer scene. appropriate for symmetric15um-aligned data
+    # NOT appropriate for DMBA aligned data, because it puts Bregma at the center of the neyuroglancer scene
+    # IF your data is aligned with DMBA, then you need to factor in a specific translation offset. This will instead put the center of the anterior Commissure at the center of the neuroglancer scene. this more or less matches previous functionality
+    # 0.005199037941243297,0.004563725401255936,-4.169626074596984 (in mm)
+    DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
+    print(xform_matrix);
+    for i in range(len(DMBA_offset_correction)):
+        xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
+
+
 # a "fix" to make sure the coronal view in neuroglacner is right side up
 def flip_xform_dimension(xform_matrix: dict, dim: int=2):
     image_matrix_numpy_array = np.asarray(xform_matrix)
@@ -308,6 +326,9 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
             will always be the same file. placement might be a pain"""
     _,data_file = os.path.split(data_file)
     _,label_file = os.path.split(label_file)
+    print("data_file, label_file, data_nhdr_file, label_nhdr_file, output_file,  json_template")
+    print(data_file, label_file, data_nhdr_file, label_nhdr_file, output_file,  json_template)
+    #exit()
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -358,6 +379,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr_file: str,
     endian = big or little (usually little)
     encoding = raw or gzip
     data file = not used here -- could start EVERYTHING from the nhdr, including naming the neuroglancer file...? hmmm"""
+    # TODO: this line fails for COLOR nhdr files. This package does not know how to handle nrrd files with multiple data files
     data_nhdr = nrrd.read_header(data_nhdr_file)
 
     # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
