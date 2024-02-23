@@ -191,6 +191,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
 
+# TODO: conditionally run the DMBA_offset_correction only for volumes aligned with DMBA. Those aligned with symmetric 15um will not present correctly anymore 
 def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
     # this SHOULD always be 3x3, but no point risking it
@@ -214,6 +215,16 @@ def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_siz
         # iterating over the last column
         temp = nhdr_dict["space origin"][i] / label_voxel_sizes[i] / 1000
         xform_matrix[i][-1] = temp
+
+    # ABOVE NO LONGER CORRECT FOR DMBA DATA
+    # this puts the volume origin at the center of the neuroglancer scene. appropriate for symmetric15um-aligned data
+    # NOT appropriate for DMBA aligned data, because it puts Bregma at the center of the neyuroglancer scene
+    # IF your data is aligned with DMBA, then you need to factor in a specific translation offset. This will instead put the center of the anterior Commissure at the center of the neuroglancer scene. this more or less matches previous functionality
+    # 0.005199037941243297,0.004563725401255936,-4.169626074596984 (in mm)
+    DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
+    print(xform_matrix);
+    for i in range(len(DMBA_offset_correction)):
+        xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
 
 # a "fix" to make sure the coronal view in neuroglacner is right side up
 def flip_xform_dimension(xform_matrix: dict, dim: int=2):
