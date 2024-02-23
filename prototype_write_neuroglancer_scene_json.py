@@ -595,6 +595,7 @@ def pathjoin(*args):
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
+# WARNING: main is not currently used in the pipeline. write_three_layer_json is called straight from $WORKSTATION_CODE/shared/Freshscreen_codes/prepare1image.py (harry)
 def main():
     logging.getLogger().setLevel(logging.INFO)
     if len(sys.argv) > 2:
