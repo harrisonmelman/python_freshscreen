@@ -400,24 +400,7 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
     ###**************####
     # TODO: can i make the label layer setup work within the image layer setup scheme?
     rccf_label_layer = data["layers"][4]
-    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
-    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
-
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label outputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["outputDimensions"]))
-
-    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes)
-    flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
 
     ###*******####
     # edit other (things that are not within data["layers"])
