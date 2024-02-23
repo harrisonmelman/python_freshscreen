@@ -55,6 +55,7 @@ class NpEncoder(json.JSONEncoder):
 
 def get_runno_from_filename(filename: str):
     f = filename.split("_")
+    print(f)
     # run number should always be the second to last field in the freshscreen name
     guess = f[-2]
     # matching criteria are it starts with N or S AND is length 6 (N12345) or length 11 (N12345NLSAM)
@@ -64,9 +65,9 @@ def get_runno_from_filename(filename: str):
     for guess in f:
         if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
             return guess
-    logging.warning("unable to find specimen run number from the filename: {}\n\t assuming you want to use: {}".format(filename. f[-2]))
-    return f[-2]
-    #return None
+    #logging.warning("unable to find specimen run number from the filename: {}\n\t assuming you want to use: {}".format(filename, f[-2]))
+    logging.warning("unable to find specimen run number from the filename: {}\n\t Will attempt to treat it as an atlas dataset. Setting runno to: {}".format(filename, f[0]))
+    return f[0]
 
 def get_contrast_from_filename(filename: str):
     #return filename.split("_")[-1].split(".")[0]
@@ -283,6 +284,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
         json_template = pathjoin(dirname, json_template)
         logging.info(dirname)
 
+    # TODO
     if data_threshold_max is None:
         pass
 
@@ -318,7 +320,8 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
     # edit image layer
     ###**************####"
     # data["layers"][1] is the image volume
-    image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr)
+    image_layer = data["layers"][1]
+    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr)
 
     ###**************####
     # edit rCCF label layer
@@ -326,26 +329,8 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
     # TODO: add more functions. this looks almost identical to code above
     # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
     rccf_label_layer = data["layers"][2]
-    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
-    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
 
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
-
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label outputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["outputDimensions"]))
-
-    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes)
-    flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
 
     ###*******####
     # edit other (things that are not within data["layers"])
@@ -478,6 +463,29 @@ def get_crossSectionScale_factor(voxel_size):
     logging.info("setting scale factor to: {}".format(scale_factor))
     return scale_factor
 
+def setup_rccf_label_layer(rccf_label_layer: dict, label_file: str, label_nhdr: str):
+    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
+    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
+
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
+
+    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
+    i = 0
+    for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
+        rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
+        i+=1
+    logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
+
+    i = 0
+    for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
+        rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
+        i+=1
+    logging.info("updated RCCF label outputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["outputDimensions"]))
+
+    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes)
+    flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
+    return rccf_label_layer
+
 def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
@@ -584,27 +592,37 @@ def find_nhdr_file(n5_file: str):
     nhdr = nrrd.read_header("{}/{}".format(out_dir, nhdr_file_name))
     return nhdr
 
-def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None):
-    """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
-
-    spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
+def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     # on windows i had to split this up because pipes are playing funny (read: not working). do not fully understand why.
     # TODO: test this doesn't break everything on mac
     # i think that i need to do with open... several times because i am usig the command line to read from the file (with grep and awk). python having the file open locks it from other prying eyes. there MIGHT(??) be a work around to this
     # this is the full command as you would run it on the command line
     # TODO: also, subprocess.run takes stdin as an argument. i am supposed to be able to pass a file handle to it, but that isn't working. that might be mroe reliable then what i am currently doing+
     #cmd_str="{} lsd freshscreen:d3mof5o | grep {} | awk '{{print $5}}'".format(RCLONE, spec_id_fresh)
-
     cmd_str="{} lsd freshscreen:d3mof5o".format(RCLONE)
     a=subprocess.run(cmd_str, shell=True, capture_output=True)
     temp_file_list = "{}/data/temp/subprocess_output".format(os.path.dirname(os.path.realpath(__file__)).replace("\\","/"))
     with open(temp_file_list, "w+b") as f:
         f.write(a.stdout)
-
+    
+    # filter for desired specimen_id (DMBA is a spec id)
     cmd_str = "grep {} {}".format(spec_id_fresh, temp_file_list)
     a=subprocess.run(cmd_str, capture_output=True)
     with open(temp_file_list, "w+b") as f:
         f.write(a.stdout)
+
+    # "parallel" grep calls on the spec_id_fresh filtered filelist. calling grep in series act as an AND filter
+    if len(contrast_list) > 0:
+        # ALWAYS want to have the label file in the returned list because that is used in any case. if we are filtering, add label
+        contrast_list.append("label")
+        captured_output = []
+        for contrast in contrast_list:
+            cmd_str = "grep {} {}".format(contrast, temp_file_list)
+            a=subprocess.run(cmd_str, capture_output=True)
+            captured_output.append(a)
+        with open(temp_file_list, "w+b") as f:
+            for a in captured_output:
+                f.write(a.stdout)
 
     cmd_str = "awk '{{print $5}}' {}".format(temp_file_list)
     a=subprocess.run(cmd_str, capture_output=True)
@@ -612,6 +630,16 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         f.write(a.stdout)
 
     filelist = a.stdout.decode("utf-8").split("\n")
+    return filelist
+
+
+def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None, contrast_list=[]):
+    """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
+
+    spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
+    filelist = get_file_list_from_freshscreen(spec_id_fresh, contrast_list)
+    print(filelist)
+
     if label_file is None:
         # if user does not provide label file, loop through s3 bucket to try and find it. returns if cannot find
         for f in filelist:
@@ -643,7 +671,8 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
         if len(data_nhdr_file) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
-            data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}*.nhdr".format(spec_id, contrast)))
+            # 2/23/24 removed the * between contrast and .nhdr; was too generous and picks up things like DMBA_dwi_bregma_update_test.nhdr
+            data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(spec_id, contrast)))
         if len(data_nhdr_file) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr_file))
             continue
@@ -715,7 +744,8 @@ def main():
             nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir)
+        contrast_list=["dwi","gqi-color"]
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 main()
