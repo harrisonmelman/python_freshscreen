@@ -1,6 +1,5 @@
 # docstring convention example:
 # like git commit rules. one line short description, skip a line, then more descriptive
-
 #def complex(real=0.0, imag=0.0):
 """Form a complex number.
 
@@ -8,11 +7,6 @@
     real -- the real part (default 0.0)
     imag -- the imaginary part (default 0.0)
     """
-
-
-# create a dict that represents the json
-# uise json library to convert it to json notation
-# write that string to a file
 
 # IMPORTS
 from typing import OrderedDict
@@ -26,7 +20,6 @@ import numpy as np
 import functools
 import glob
 import subprocess
-# header = nrrd.read_header('output.nrrd') # possible to only read the nrrd header
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
 # needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
@@ -53,6 +46,7 @@ class NpEncoder(json.JSONEncoder):
             return bool(obj)
         return super(NpEncoder, self).default(obj)
 
+# TODO: this needs to be refactored or reconsidered
 def get_runno_from_filename(filename: str):
     f = filename.split("_")
     print(f)
@@ -70,12 +64,10 @@ def get_runno_from_filename(filename: str):
     return f[0]
 
 def get_contrast_from_filename(filename: str):
-    #return filename.split("_")[-1].split(".")[0]
-    # dirty fix for a couple of the lightsheet volumes endinging in -ls on freshscreen
+    # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
+    # split on "_" and take the last one
+    # split on "." to remove the file extension
     return filename.split("_")[-1].split(".")[0]
-    # old version was deleting the "-color" part of "nqa-color", so search was failing
-    # unknown consequences
-    #return filename.split("_")[-1].split(".")[0].split("-")[0]
 
 def get_default_threshold(filename: str):
     """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
@@ -123,9 +115,6 @@ def get_default_threshold(filename: str):
         "tdi-color" : (0,100),
         "tdi3-color" : (0,100)
     }
-    # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
-    # split on "_" and take the last one
-    # split on "." to remove the file extension
     contrast = get_contrast_from_filename(filename)
     return DEFAULT_THRESHOLDS[contrast]
     #return d17gaj40_THRESHOLDS[contrast]
@@ -236,8 +225,7 @@ def flip_xform_dimension(xform_matrix: dict, dim: int=2):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-# TODO: color images are currently ignored
-def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
+def write_grayscale_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -289,7 +277,7 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
         pass
 
     # starting point is a representative template file
-    # we load that in as a dict and edit the fierlds accordingly
+    # we load that in as a dict and edit the fields accordingly
     data = None
     with open(json_template) as template:
         data = json.load(template)
@@ -309,8 +297,6 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
         endian = big or little (usually little)
         encoding = raw or gzip
         data file = not used here -- could start EVERYTHING from the nhdr, including naming the neuroglancer file...? hmmm"""
-    #data_nhdr = nrrd.read_header(data_nhdr_file)
-    #label_nhdr = nrrd.read_header(label_nhdr_file)
 
     # i calculate these also in setup_one_image_layer, but i also need them for other things...
     data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
@@ -326,8 +312,6 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
     ###**************####
     # edit rCCF label layer
     ###**************####
-    # TODO: add more functions. this looks almost identical to code above
-    # transform matrix should be identical to MRI volumes -- will be slightly different from lightsheet. hoping that the nhdr will solve ls problems (it did)
     rccf_label_layer = data["layers"][2]
     rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
 
@@ -356,14 +340,8 @@ def write_three_layer_json(data_file: str, label_file: str, data_nhdr: dict, lab
         i+=1
 
     logging.debug("final form of data dict: \n{}".format(data))
-
-    # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
-    # who should be responsible for choosing that name?
     write_freshscreen_display_json(data, data_file, output_file)
-    #url = convert_json_to_url(convert_dict_to_string(data))
 
-# starting as a direct copy of write_three_layer_json
-# mostly will be the same, just have two extra data layers to handle
 def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
@@ -381,14 +359,12 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
         logging.warning("Unable to read template file: {}".format(json_template))
         return None
 
-    #data_nhdr = nrrd.read_header(data_nhdr_file)
-    #label_nhdr = nrrd.read_header(label_nhdr_file)
     data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
+    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
 
     ###**************####
     # edit image layers
     ###**************####
-    # replacement for the above mess
     # layer 0 is red, 1 is green, 2 is blue
     # these are according to the template file neroglancer_json_templates/color_template.json
     red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0")
@@ -398,7 +374,6 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
     ###**************####
     # edit rCCF label layer
     ###**************####
-    # TODO: can i make the label layer setup work within the image layer setup scheme?
     rccf_label_layer = data["layers"][4]
     rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
 
@@ -413,7 +388,6 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
     # set global camera zoom level
     data["crossSectionScale"] = get_crossSectionScale_factor(data_voxel_sizes[0])
 
-
     # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
     # these could really all be done in the same loop, because the keys will always be [x,y,z] (TODO: confirm this)
     """i = 0
@@ -426,9 +400,6 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
         i+=1
 
     logging.debug("final form of data dict: \n{}".format(data))
-
-    # TODO: output file name? -- will be exacly the n5 filename plus .json at the end
-    # who should be responsible for choosing that name?
     write_freshscreen_display_json(data, data_file, output_file)
 
 def get_crossSectionScale_factor(voxel_size):
@@ -445,6 +416,7 @@ def get_crossSectionScale_factor(voxel_size):
         scale_factor = 0.8
     logging.info("setting scale factor to: {}".format(scale_factor))
     return scale_factor
+
 
 def setup_rccf_label_layer(rccf_label_layer: dict, label_file: str, label_nhdr: str):
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
@@ -615,7 +587,6 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None, contrast_list=[]):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
 
@@ -639,8 +610,6 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
             continue
         if not f or f is None:
             continue
-        # extract run number and contrast to find the nhdr
-        #runno = f.split("_")[2]
         runno = get_runno_from_filename(f)
         contrast = get_contrast_from_filename(f)
 
@@ -648,6 +617,8 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
             # then we take the dwi nhdr and use that
             # the transform matrix will still be valid but voxel sizes NOT NECESSARILY
             # below we account for voxel size difference in tdi3 and tdi5 file
+            # this is done because the pynrrd library fails to read in color nhdr files with channels split into separate raw files
+            # TODO: finish improving James' nrrd reader replacement and universally use that one
             contrast="dwi"
 
         data_file = f
@@ -659,7 +630,6 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if len(data_nhdr_file) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr_file))
             continue
-            #exit()
         # WARNING: glob still throws backslashes in...
             # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
         data_nhdr_file = data_nhdr_file[0].replace("\\","/")
@@ -707,7 +677,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if "color" in f.lower():
             write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
             continue
-        write_three_layer_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
+        write_grayscale_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
