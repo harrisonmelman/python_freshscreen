@@ -417,6 +417,17 @@ def get_crossSectionScale_factor(voxel_size):
     logging.info("setting scale factor to: {}".format(scale_factor))
     return scale_factor
 
+def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str, job_id: str=""):
+    if dimension_field not in ["inputDimensions", "outputDimensions"]:
+        logging.warning("unrecognized dimension field: {}\nCan not write. Only allowed options are: 'inputDimensions' and 'outputDimensions'".format(dimension_field))
+        return
+
+    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
+    i = 0
+    for key in data_layer["source"]["transform"][dimension_field].keys():
+        data_layer["source"]["transform"][dimension_field][key][0] = voxel_sizes[i]
+        i+=1
+    logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
 def setup_rccf_label_layer(rccf_label_layer: dict, label_file: str, label_nhdr: str):
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
@@ -424,18 +435,8 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_file: str, label_nhdr: 
 
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
 
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["inputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["inputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label inputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["inputDimensions"]))
-
-    i = 0
-    for key in rccf_label_layer["source"]["transform"]["outputDimensions"].keys():
-        rccf_label_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated RCCF label outputDimensions to: {}".format(rccf_label_layer["source"]["transform"]["outputDimensions"]))
+    update_dimensions(rccf_label_layer, label_voxel_sizes, "inputDimensions", job_id="RCCF label layer")
+    update_dimensions(rccf_label_layer, label_voxel_sizes, "outputDimensions", job_id="RCCF label layer")
 
     update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes)
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
@@ -451,24 +452,10 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # edit the layer name
     image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
 
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
     data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["inputDimensions"].keys():
-        image_layer["source"]["transform"]["inputDimensions"][key][0] = data_voxel_sizes[i]
-        i+=1
-    logging.info("updated inputDimensions to: {}".format(image_layer["source"]["transform"]["inputDimensions"]))
-
-    # set outputDimensions. this should be inferred from the LABEL nhdr (because this will always be at MRI resolution, even if the image is a lightsheet)
-    # TODO: this is almost identical to above 6 lines. functionize?
-        # i also repeat these two chunks (nearly) verbatim below for the rccf label layer
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-    i = 0
-    for key in image_layer["source"]["transform"]["outputDimensions"].keys():
-        image_layer["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-    logging.info("updated outputDimensions to: {}".format(image_layer["source"]["transform"]["outputDimensions"]))
-
+    update_dimensions(image_layer, data_voxel_sizes, "inputDimensions", job_id="image layer")
+    update_dimensions(image_layer, label_voxel_sizes, "outputDimensions", job_id="image layer")
 
     # update shader controls (default window and level)
     # range is range of data to be rendered on screen
