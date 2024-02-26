@@ -96,7 +96,7 @@ def get_default_threshold(filename: str):
         "nqa-color" : (0,100),
         "gqi-color" : (0,100),
         "tdi-color" : (0,100),
-        "tdi3-color" : (0,20)
+        "tdi3-color" : (0,100)
     }
     # no idea if this will work as expected or not...
     d17gaj40_THRESHOLDS = {
@@ -191,7 +191,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
 
-# TODO: conditionally run the DMBA_offset_correction only for volumes aligned with DMBA. Those aligned with symmetric 15um will not present correctly anymore 
+# TODO: conditionally run the DMBA_offset_correction only for volumes aligned with DMBA. Those aligned with symmetric 15um will not present correctly anymore
 def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
     # this SHOULD always be 3x3, but no point risking it
@@ -545,6 +545,59 @@ def find_nhdr_file(n5_file: str):
     nhdr = nrrd.read_header("{}/{}".format(out_dir, nhdr_file_name))
     return nhdr
 
+def find_nhdr_file(runno: str, contrast: str="dwi", local_search_dir: str=None):
+    """search for an nhdr file matching both runno and contrast in the schema *${runno}*${contrast}*.nhdr VERY BROAD INCLUSIVE SEARCH (technically, order does not even matter, just runs grep callls in series)
+
+    runno=a specimen identifier. Can be runno-like (N12345), specimen-id-lik (200316-1_1) or atlas-id-like (DMBA)
+    contrast=an image contrast. by default, will return the DWI (a good default template for non-contrast-specific tasks)
+    If provided, will first search through local_search_dir, then it will search within the Freshscreen S3 bucket. returns None if it fails to find any matching nhdr files
+    """
+    if local_search_dir is not None:
+        data_nhdr_file = glob.glob(pathjoin(local_search_dir, "*{}*_{}*.nhdr".format(runno, contrast)))
+        if len(data_nhdr_file) > 0:
+            return data_nhdr_file[0]
+        # also check one folder up, in case files were reorganized and the dwi is actually hiding one folder up
+        data_nhdr_file = glob.glob(pathjoin(local_search_dir, "/../*{}*_{}*.nhdr".format(runno, contrast)))
+        if len(data_nhdr_file) > 0:
+            return data_nhdr_file[0]
+
+
+    # ACTUALLY, second guess this. We will need more thought to read a nrrd using pynrrd FROM s3
+    # all it actually takes is a subprocess.run call, using "rclone cat"
+    # search s3
+    # this next line is the only difference (lsf vs lsd) in searching for heirarchial vs nhdr files
+    cmd_str="{} lsf freshscreen:d3mof5o".format(RCLONE)
+    a=subprocess.run(cmd_str, shell=True, capture_output=True)
+    temp_file_list = "{}/data/temp/subprocess_output_lsf".format(os.path.dirname(os.path.realpath(__file__)).replace("\\","/"))
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+
+    # filter for desired nhdr files only
+    cmd_str = "grep {} {}".format(".nhdr", temp_file_list)
+    a=subprocess.run(cmd_str, capture_output=True)
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+    # filter for desired runno
+    cmd_str = "grep {} {}".format(runno, temp_file_list)
+    a=subprocess.run(cmd_str, capture_output=True)
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+    # filter for desired contrast only
+    cmd_str = "grep {} {}".format(contrast, temp_file_list)
+    a=subprocess.run(cmd_str, capture_output=True)
+    with open(temp_file_list, "w+b") as f:
+        f.write(a.stdout)
+
+    filelist = a.stdout.decode("utf-8").split("\n")
+    # hopefully the first one in this list is good. (if everything works as expected, it will have length one)
+    return filelist[0]
+
+# !!! this one ONLY gets heirarchial data from freshscreen.
+# lsd only gets folders. this will only get .n5 and .precomputed datasets
+# will not edit right now, will handle nhdr find code solely in the find_nhdr_file function
 def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     # on windows i had to split this up because pipes are playing funny (read: not working). do not fully understand why.
     # TODO: test this doesn't break everything on mac
@@ -557,7 +610,7 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     temp_file_list = "{}/data/temp/subprocess_output".format(os.path.dirname(os.path.realpath(__file__)).replace("\\","/"))
     with open(temp_file_list, "w+b") as f:
         f.write(a.stdout)
-    
+
     # filter for desired specimen_id (DMBA is a spec id)
     cmd_str = "grep {} {}".format(spec_id_fresh, temp_file_list)
     a=subprocess.run(cmd_str, capture_output=True)
@@ -590,9 +643,9 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
     output_dir = directory to write the resulting json file
-    data_nhdr_file = INPUT data nhdr file with CIVM naming 
-    label_nhdr_file = INPUT label nhdr file with CIVM naming 
-    label_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work. 
+    data_nhdr_file = INPUT data nhdr file with CIVM naming
+    label_nhdr_file = INPUT label nhdr file with CIVM naming
+    label_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work.
     """
     # these are the types of files we DO NOT want to process here
     # labels are included here because they will never be presented on their own, only as a layer with other files
@@ -606,8 +659,15 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     contrast = get_contrast_from_filename(filename)
 
     print("data nhdr file = {}".format(data_nhdr_file))
+    if "color" in data_nhdr_file:
+        logging.info("processing COLOR file. Will use the DWI nhdr file for metadata purposes. ")
+        search_dir = os.path.dirname(data_nhdr_file)
+        data_nhdr_file = find_nhdr_file(runno, "dwi", local_search_dir=search_dir)
     data_nhdr = nrrd.read_header(data_nhdr_file)
     if "color" in filename.lower():
+        # this is necessary because we always use the dwi nhdr file to handle COLOR nhdrs
+        # cause is pynrrd library cannot read the complicated mutli-data-file nhdrs
+        # nhdr use here is only to get metadata such as voxel size, rotation matrix, and translation offset for display purposes
         if "tdi3" in filename.lower():
             data_nhdr["space directions"] = data_nhdr["space directions"] / 3
         if "tdi5" in filename.lower():
@@ -617,9 +677,14 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     label_nhdr = nrrd.read_header(label_nhdr_file)
 
     output_file = pathjoin(output_dir, "{}.json".format(filename))
-    logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_file, label_nhdr_file, output_file))
-    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file,  label_file, label_nhdr_file, output_file))
+    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_file, label_nhdr_file, output_file))
 
+    print("PROCESSING FOLLOWING JOB:")
+    print("\tfilename = {}".format(filename))
+    print("\tlabel_file = {}".format(label_file))
+    print("\tdata nhdr = {}".format(data_nhdr))
+    print("\tlabel nhdr = {}".format(label_nhdr))
+    print("\toutput_file = {}".format(output_file))
     if "color" in filename.lower():
         write_color_json(filename, label_file, data_nhdr, label_nhdr, output_file)
         return
@@ -644,6 +709,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
     for filename in filelist:
         runno = get_runno_from_filename(filename)
         contrast = get_contrast_from_filename(filename)
+        print("contrast == {}".format(contrast))
         if "color" in filename.lower():
             # then we take the dwi nhdr and use that
             # the transform matrix will still be valid but voxel sizes NOT NECESSARILY
