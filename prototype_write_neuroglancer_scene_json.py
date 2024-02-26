@@ -585,6 +585,46 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_file: str=None):
+    """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
+
+    filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
+    output_dir = directory to write the resulting json file
+    data_nhdr_file = INPUT data nhdr file with CIVM naming 
+    label_nhdr_file = INPUT label nhdr file with CIVM naming 
+    label_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work. 
+    """
+    # these are the types of files we DO NOT want to process here
+    # labels are included here because they will never be presented on their own, only as a layer with other files
+    if "label" in filename.lower():
+        return
+    if "gre" in filename.lower():
+        return
+    if not filename or filename is None:
+        return
+    runno = get_runno_from_filename(filename)
+    contrast = get_contrast_from_filename(filename)
+
+    print("data nhdr file = {}".format(data_nhdr_file))
+    data_nhdr = nrrd.read_header(data_nhdr_file)
+    if "color" in filename.lower():
+        if "tdi3" in filename.lower():
+            data_nhdr["space directions"] = data_nhdr["space directions"] / 3
+        if "tdi5" in filename.lower():
+            data_nhdr["space directions"] = data_nhdr["space directions"] / 5
+    # TODO: find label nhdr on freshscreen
+        # do we ever upload label nhdr to freshscreen? how do we distribute labels to people?
+    label_nhdr = nrrd.read_header(label_nhdr_file)
+
+    output_file = pathjoin(output_dir, "{}.json".format(filename))
+    logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_file, label_nhdr_file, output_file))
+    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file,  label_file, label_nhdr_file, output_file))
+
+    if "color" in filename.lower():
+        write_color_json(filename, label_file, data_nhdr, label_nhdr, output_file)
+        return
+    write_grayscale_json(filename, label_file, data_nhdr, label_nhdr, output_file)
+
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None, contrast_list=[]):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
 
@@ -601,25 +641,16 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if label_file is None:
             logging.warning("cannot find a label file in s3 for specimen {}".format(spec_id_fresh))
             return None
-    for f in filelist:
-        if "label" in f.lower():
-            continue
-        if "gre" in f.lower():
-            continue
-        if not f or f is None:
-            continue
-        runno = get_runno_from_filename(f)
-        contrast = get_contrast_from_filename(f)
-
-        if "color" in f.lower():
+    for filename in filelist:
+        runno = get_runno_from_filename(filename)
+        contrast = get_contrast_from_filename(filename)
+        if "color" in filename.lower():
             # then we take the dwi nhdr and use that
             # the transform matrix will still be valid but voxel sizes NOT NECESSARILY
             # below we account for voxel size difference in tdi3 and tdi5 file
             # this is done because the pynrrd library fails to read in color nhdr files with channels split into separate raw files
             # TODO: finish improving James' nrrd reader replacement and universally use that one
             contrast="dwi"
-
-        data_file = f
         data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(runno, contrast)))
         if len(data_nhdr_file) == 0:
             # then maybe the files do not have a runno in the name (light lightsheet). search for spec_id instead
@@ -627,20 +658,13 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
             data_nhdr_file = glob.glob(pathjoin(nhdr_dir, "*{}*_{}.nhdr".format(spec_id, contrast)))
         if len(data_nhdr_file) != 1:
             logging.error("found zero or multiple nhdr files for {} {}. do not know what to do.\n\t{}".format(spec_id, contrast, data_nhdr_file))
-            continue
+            return
         # WARNING: glob still throws backslashes in...
             # this is because under the hood it still uses os.path.join() and os.path.sep WILL end up in your path outputted by glob
         data_nhdr_file = data_nhdr_file[0].replace("\\","/")
         if not os.path.isfile(data_nhdr_file):
             logging.error("cannot find data nhdr locally: {}".format(data_nhdr_file))
             exit()
-        data_nhdr = nrrd.read_header(data_nhdr_file)
-        if "color" in f.lower():
-            if "tdi3" in f.lower():
-                data_nhdr["space directions"] = data_nhdr["space directions"] / 3
-            if "tdi5" in f.lower():
-                data_nhdr["space directions"] = data_nhdr["space directions"] / 5
-
         label_nhdr_file = glob.glob(pathjoin(nhdr_dir,"labels","*", "*{}*label*.nhdr".format(runno)))
         if len(label_nhdr_file) == 0:
             logging.error("cannot find a relevant label nhdr file for {}.".format(spec_id))
@@ -649,33 +673,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if not os.path.isfile(label_nhdr_file):
             logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
             exit()
-        # TODO: find label nhdr on freshscreen
-            # WAIT A SECOND we never upload labels.nhdr files
-            # oops......not sure what to do about this one.
-        label_nhdr = nrrd.read_header(label_nhdr_file)
-        # above is replaced by a new funciton that finds the nhdr based on n5 file, in s3
-        # cant make this work rn...
-        # TODO:
-        #   data_nhdr = find_nhdr_file(data_file)
-        # what about label file???
-
-        if contrast in LIGHTSHEET_CONTRASTS:
-            # lightsheet volumes are saved locally with spec id instead of runno in the filename
-            # TODO: clarify between freshscreen and CIVM specimen id's (i.e. difference between 190415-2_1 and 190415-2-1)
-            print("contrast is: {}".format(contrast))
-            # i think this if statement is NEVER reachable
-            if contrast in "mGRE":
-                contrast = "mAVG"
-            data_nhdr_file = pathjoin(nhdr_dir, "{}_{}.nhdr".format(spec_id, contrast))
-
-        output_file = pathjoin(output_dir, "{}.json".format(f))
-        logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file, data_nhdr_file, label_file, label_nhdr_file, output_file))
-        #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t data_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(data_file,  label_file, label_nhdr_file, output_file))
-
-        if "color" in f.lower():
-            write_color_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
-            continue
-        write_grayscale_json(data_file, label_file, data_nhdr, label_nhdr, output_file)
+        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_file)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
