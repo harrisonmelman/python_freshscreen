@@ -92,7 +92,14 @@ def get_default_threshold(filename: str):
         "tdi" : (0,20),
         "tdi3" : (0,20),
         "tdi5" : (0,20),
+        "m0" : (0,70000),
+        "m1" : (0,45000),
+        "m2" : (0,25000),
+        "m3" : (0,15000),
         "b0" : (0,30000),
+        "annotation" : (0,100),
+        "average-template" : (0,100),
+        "ara-nissl" : (0,100),
         "nqa-color" : (0,100),
         "gqi-color" : (0,100),
         "tdi-color" : (0,100),
@@ -658,7 +665,7 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     runno = get_runno_from_filename(filename)
     contrast = get_contrast_from_filename(filename)
 
-    print("data nhdr file = {}".format(data_nhdr_file))
+    logging.info("data nhdr file = {}".format(data_nhdr_file))
     if "color" in data_nhdr_file:
         logging.info("processing COLOR file. Will use the DWI nhdr file for metadata purposes. ")
         search_dir = os.path.dirname(data_nhdr_file)
@@ -679,12 +686,18 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     output_file = pathjoin(output_dir, "{}.json".format(filename))
     #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_file, label_nhdr_file, output_file))
 
-    print("PROCESSING FOLLOWING JOB:")
-    print("\tfilename = {}".format(filename))
-    print("\tlabel_file = {}".format(label_file))
-    print("\tdata nhdr = {}".format(data_nhdr))
-    print("\tlabel nhdr = {}".format(label_nhdr))
-    print("\toutput_file = {}".format(output_file))
+    # check if label_file is an absolute path or just a filename
+    # sometimes it is passed to us as B:/Freshscreen_library/xyzx_RCCF_labels.precomputed
+    # but we want to find it in s3, so all we need is the basename xyzx_RCCF_labels.precomputed
+    # confirmed that os.path.basename does nothing when given only "xyzx_RCCF_labels.precomputed", so no checks are necessary
+    label_path = os.path.basename(label_path)
+
+    logging.info("PROCESSING FOLLOWING JOB:")
+    logging.info("\tfilename = {}".format(filename))
+    logging.info("\tlabel_file = {}".format(label_file))
+    logging.info("\tdata nhdr = {}".format(data_nhdr))
+    logging.info("\tlabel nhdr = {}".format(label_nhdr))
+    logging.info("\toutput_file = {}".format(output_file))
     if "color" in filename.lower():
         write_color_json(filename, label_file, data_nhdr, label_nhdr, output_file)
         return
