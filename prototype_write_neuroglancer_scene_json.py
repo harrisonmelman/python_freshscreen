@@ -26,8 +26,10 @@ import subprocess
 # example usage:
     # n5_filepath="{}/{}/{}.format(N5_PREFIX, filename, N5_SUFFIX)"
     # precomputed_filepath="{}/{}.format(PRECOMPUTED_PREFIX, filename)"
-N5_PREFIX = "n5://https://d3mof5o.s3.amazonaws.com"
-PRECOMPUTED_PREFIX = "precomputed://https://d3mof5o.s3.amazonaws.com"
+#N5_PREFIX = "n5://https://d3mof5o.s3.amazonaws.com"
+#PRECOMPUTED_PREFIX = "precomputed://https://d3mof5o.s3.amazonaws.com"
+N5_PREFIX = "n5://https://fast-s3.oit.duke.edu/freshscreen/dh-civm-public"
+PRECOMPUTED_PREFIX = "precomputed://https://fast-s3.oit.duke.edu/freshscreen/dh-civm-public"
 # this is needed at the end of all N5 file paths, to tell neuroglancer where the data lives in the folder struct
 N5_SUFFIX="setup0/timepoint0/"
 LIGHTSHEET_CONTRASTS = ["NeuN", "autof", "Thy1", "MBP", "ChAT"]
@@ -45,6 +47,7 @@ class NpEncoder(json.JSONEncoder):
         elif isinstance(obj, np.bool_):
             return bool(obj)
         return super(NpEncoder, self).default(obj)
+
 
 # TODO: this needs to be refactored or reconsidered
 def get_runno_from_filename(filename: str):
@@ -86,6 +89,9 @@ def get_default_threshold(filename: str):
         "NeuN" : (0,1500),
         "MBP" : (0,1300),
         "autof" : (0,1200),
+        "SST" : (0,1000),
+        "NFH" : (0,2000),
+        "NPY" : (0,1200),
         "Thy1" : (0,4000),
         "IBA1" : (0,1300),
         "Syto16" : (0,12000),
@@ -103,12 +109,14 @@ def get_default_threshold(filename: str):
         "nqa-color" : (0,100),
         "gqi-color" : (0,100),
         "tdi-color" : (0,100),
+        "tdi5um-color" : (0,100),
         "tdi3-color" : (0,100)
     }
     # no idea if this will work as expected or not...
     d17gaj40_THRESHOLDS = {
         "dwi" : (0,5000),
         "fa" : (0,1),
+        "lc" : (0,1),
         "ad" : (0,0.0009),
         "rd" : (0,0.0005),
         "md" : (0,0.0006),
@@ -123,7 +131,11 @@ def get_default_threshold(filename: str):
         "tdi3-color" : (0,100)
     }
     contrast = get_contrast_from_filename(filename)
-    return DEFAULT_THRESHOLDS[contrast]
+    if contrast in DEFAULT_THRESHOLDS:
+        return DEFAULT_THRESHOLDS[contrast]
+    else:
+        print("WARNING: contrast unknown. using default contrast boundaries of (0,1)")
+        return (0,1)
     #return d17gaj40_THRESHOLDS[contrast]
 
 def convert_dict_to_string(data: dict):
@@ -198,8 +210,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
 
-# TODO: conditionally run the DMBA_offset_correction only for volumes aligned with DMBA. Those aligned with symmetric 15um will not present correctly anymore
-def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list):
+def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, correct_DMBA_offset=False):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
     # this SHOULD always be 3x3, but no point risking it
     # flatten array so it can be used inside of a lambda easily
@@ -228,10 +239,11 @@ def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_siz
     # NOT appropriate for DMBA aligned data, because it puts Bregma at the center of the neyuroglancer scene
     # IF your data is aligned with DMBA, then you need to factor in a specific translation offset. This will instead put the center of the anterior Commissure at the center of the neuroglancer scene. this more or less matches previous functionality
     # 0.005199037941243297,0.004563725401255936,-4.169626074596984 (in mm)
-    DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
-    print(xform_matrix);
-    for i in range(len(DMBA_offset_correction)):
-        xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
+    if correct_DMBA_offset:
+        DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
+        print(xform_matrix);
+        for i in range(len(DMBA_offset_correction)):
+            xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
 
 # a "fix" to make sure the coronal view in neuroglacner is right side up
 def flip_xform_dimension(xform_matrix: dict, dim: int=2):
@@ -243,13 +255,13 @@ def flip_xform_dimension(xform_matrix: dict, dim: int=2):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None, correct_DMBA_offset=False):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
-        label_file -- name of the root folder of label file, as it sits on S3
+        label_precomputed_file -- name of the root folder of label file, as it sits on S3
         data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
-        label_nhdr -- analogous to data_nhdr for label_file
+        label_nhdr -- analogous to data_nhdr for label_precomputed_file
         output_file -- the freshscreen display json file to eventually write to.
         json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
             - current template was copied from N58204NLSAM_dwi
@@ -325,13 +337,13 @@ def write_grayscale_json(data_file: str, label_file: str, data_nhdr: dict, label
     ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
-    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr)
+    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
     rccf_label_layer = data["layers"][2]
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
 
 
     ###*******####
@@ -360,7 +372,8 @@ def write_grayscale_json(data_file: str, label_file: str, data_nhdr: dict, label
     logging.debug("final form of data dict: \n{}".format(data))
     write_freshscreen_display_json(data, data_file, output_file)
 
-def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None):
+# TODO: handle correct_DMMBA_offset
+def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None, correct_DMBA_offset=False):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -385,15 +398,15 @@ def write_color_json(data_file: str, label_file: str, data_nhdr: dict, label_nhd
     ###**************####
     # layer 0 is red, 1 is green, 2 is blue
     # these are according to the template file neroglancer_json_templates/color_template.json
-    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0")
-    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0")
-    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0")
+    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
+    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
+    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
     rccf_label_layer = data["layers"][4]
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_file, label_nhdr)
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
 
     ###*******####
     # edit other (things that are not within data["layers"])
@@ -447,20 +460,20 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
         i+=1
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
-def setup_rccf_label_layer(rccf_label_layer: dict, label_file: str, label_nhdr: str):
-    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_file)
-    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_file), get_contrast_from_filename(label_file))
+def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, correct_DMBA_offset=False):
+    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_precomputed_file)
+    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_precomputed_file), get_contrast_from_filename(label_precomputed_file))
 
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
 
     update_dimensions(rccf_label_layer, label_voxel_sizes, "inputDimensions", job_id="RCCF label layer")
     update_dimensions(rccf_label_layer, label_voxel_sizes, "outputDimensions", job_id="RCCF label layer")
 
-    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes)
+    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes, correct_DMBA_offset)
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
     return rccf_label_layer
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX):
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, correct_DMBA_offset=False):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
@@ -468,7 +481,14 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix)
 
     # edit the layer name
-    image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
+    # TODO: this solution will probably only work once, for DMBA, today (april 3 2025)
+    if correct_DMBA_offset and "DMBA-LS" in data_file:  # use this as an indicator we are working with a DMBA atlas dataset
+        # this is to solve an issue where lsfm datasets are getting named "DMBA-LS CD31" for example, omitting the individual's specimen ID number
+        # ONLY RUN ON LSFM DATASETS
+        spec_id = data_file.split("_")[1]
+        image_layer["name"] = "{} {} {}".format(get_runno_from_filename(data_file), spec_id, get_contrast_from_filename(data_file))
+    else:
+        image_layer["name"] = "{} {}".format(get_runno_from_filename(data_file), get_contrast_from_filename(data_file))
 
     data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
@@ -484,7 +504,7 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     image_layer["shaderControls"]["normalized"]["range"][1] = max_range
     image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
 
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes)
+    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, correct_DMBA_offset)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
 
     return image_layer
@@ -645,14 +665,14 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_file: str=None):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
     output_dir = directory to write the resulting json file
     data_nhdr_file = INPUT data nhdr file with CIVM naming
     label_nhdr_file = INPUT label nhdr file with CIVM naming
-    label_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work.
+    label_precomputed_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work.
     """
     # these are the types of files we DO NOT want to process here
     # labels are included here because they will never be presented on their own, only as a layer with other files
@@ -675,48 +695,54 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
         # this is necessary because we always use the dwi nhdr file to handle COLOR nhdrs
         # cause is pynrrd library cannot read the complicated mutli-data-file nhdrs
         # nhdr use here is only to get metadata such as voxel size, rotation matrix, and translation offset for display purposes
-        if "tdi3" in filename.lower():
+        # TODO: we are changing to say "tdi5um" instead of the scale factor
+        #if "tdi3" in filename.lower():
+        #    data_nhdr["space directions"] = data_nhdr["space directions"] / 3
+        #if "tdi5" in filename.lower():
+        #    data_nhdr["space directions"] = data_nhdr["space directions"] / 5
+        if "tdi5um" in filename.lower():
+            # TODO: incomplete solution which only works for DMBA
+            # p5robably, just manually set the space directions
             data_nhdr["space directions"] = data_nhdr["space directions"] / 3
-        if "tdi5" in filename.lower():
-            data_nhdr["space directions"] = data_nhdr["space directions"] / 5
     # TODO: find label nhdr on freshscreen
         # do we ever upload label nhdr to freshscreen? how do we distribute labels to people?
     label_nhdr = nrrd.read_header(label_nhdr_file)
 
     output_file = pathjoin(output_dir, "{}.json".format(filename))
-    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_file, label_nhdr_file, output_file))
+    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_precomputed_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_precomputed_file, label_nhdr_file, output_file))
 
-    # check if label_file is an absolute path or just a filename
+    # check if label_precomputed_file is an absolute path or just a filename
     # sometimes it is passed to us as B:/Freshscreen_library/xyzx_RCCF_labels.precomputed
     # but we want to find it in s3, so all we need is the basename xyzx_RCCF_labels.precomputed
     # confirmed that os.path.basename does nothing when given only "xyzx_RCCF_labels.precomputed", so no checks are necessary
-    label_path = os.path.basename(label_path)
+    print(label_precomputed_file)
+    label_precomputed_file = os.path.basename(label_precomputed_file)
 
     logging.info("PROCESSING FOLLOWING JOB:")
     logging.info("\tfilename = {}".format(filename))
-    logging.info("\tlabel_file = {}".format(label_file))
+    logging.info("\tlabel_precomputed_file = {}".format(label_precomputed_file))
     logging.info("\tdata nhdr = {}".format(data_nhdr))
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
     if "color" in filename.lower():
-        write_color_json(filename, label_file, data_nhdr, label_nhdr, output_file)
+        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, correct_DMBA_offset=correct_DMBA_offset)
         return
-    write_grayscale_json(filename, label_file, data_nhdr, label_nhdr, output_file)
+    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, correct_DMBA_offset=correct_DMBA_offset)
 
-def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_file: str=None, contrast_list=[]):
+def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], correct_DMBA_offset=False):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
 
     spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
     filelist = get_file_list_from_freshscreen(spec_id_fresh, contrast_list)
     print(filelist)
 
-    if label_file is None:
+    if label_precomputed_file is None:
         # if user does not provide label file, loop through s3 bucket to try and find it. returns if cannot find
         for f in filelist:
             if "label" in f.lower():
-                label_file = f
+                label_precomputed_file = f
                 break
-        if label_file is None:
+        if label_precomputed_file is None:
             logging.warning("cannot find a label file in s3 for specimen {}".format(spec_id_fresh))
             return None
     for filename in filelist:
@@ -752,13 +778,17 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if not os.path.isfile(label_nhdr_file):
             logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
             exit()
-        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_file)
+        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, correct_DMBA_offset=correct_DMBA_offset)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 def main():
+    correct_DMBA_offset=True
+    #Set variable to None if you want to search S3
+    label_precomputed_file="DMBA_RCCF_labels.precomputed"
+    #label_precomputed_file=None
     logging.getLogger().setLevel(logging.INFO)
     if len(sys.argv) > 2:
         # i am not even using project_code
@@ -773,7 +803,7 @@ def main():
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
         contrast_list=["dwi","gqi-color"]
-        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list)
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, correct_DMBA_offset=correct_DMBA_offset, label_precomputed_file=label_precomputed_file)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 main()
