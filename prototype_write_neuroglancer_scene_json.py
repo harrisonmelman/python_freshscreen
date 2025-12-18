@@ -20,6 +20,7 @@ import numpy as np
 import functools
 import glob
 import subprocess
+import csv
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
 # needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
@@ -253,9 +254,49 @@ def flip_xform_dimension(xform_matrix: dict, dim: int=2):
     for i in range(len(xform_matrix[flip_row_index])):
         xform_matrix[flip_row_index][i] = -1 * xform_matrix[flip_row_index][i]
 
+
+# helper function for convert_lut_file
+def rgba_to_hex(r, g, b, a):
+    r=int(float(r))
+    g=int(float(g))
+    b=int(float(b))
+    a=int(float(a))
+    # :02x means "2 digits, lowercase hex" (use :02X for uppercase)
+    return f"#{r:02x}{g:02x}{b:02x}{a:02x}"
+
+
+# reads a CIVM complex stats lookup table and converts it to a neuroglancer compatible lut
+# returns a dict with key=ROI number as a string, value=color in hex
+def convert_lut_file(label_lut_file):
+    roi_dict = {}
+    with open(label_lut_file, 'r') as file:
+        # resolve header fields
+        # Done this way to safely have 'ROI' as the key field instead of '# ROI'
+        original_reader = csv.reader(file,delimiter='\t')
+        original_headers = next(original_reader)
+        
+        # strip whitespace and replace "# ROI" with "ROI"
+        cleaned_headers = [h.strip().replace('# ROI', 'ROI') for h in original_headers]
+        
+        # Skip the comment row
+        next(file)
+        
+        # use dict reader with cleaned headers
+        reader = csv.DictReader(file, fieldnames=cleaned_headers, delimiter='\t')
+        
+        # Now iterate as normal
+        for row in reader:
+            roi = row['ROI']
+            if 'NaN' in roi:
+                # TODO: i don't love this conditional. is it safe??
+                continue
+            hex_color = rgba_to_hex(row['c_r'],row['c_g'],row['c_b'],row['c_a'])
+            roi_dict[roi] = hex_color
+    return roi_dict
+
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/N58204NLSAM_dwi_template.json", data_threshold_max=None, correct_DMBA_offset=False):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, correct_DMBA_offset=False, overlay_layers=[]):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -266,6 +307,8 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
             - current template was copied from N58204NLSAM_dwi
         data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
+        correct_DMBA_offset -- boolean whether to offset the volume to be centered at Bregma
+        overlay_layers -- optional list of lookup table file paths to color the labels with
 
         returns a dict that represents the json file. DON'T (???) have this one also write it to a file. make another function decide where to put it
         # actually it is not really necessary to save this as a json file. instead it could return the url encoded string? unsure. does not matter right now
@@ -345,6 +388,23 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     rccf_label_layer = data["layers"][2]
     rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
 
+    ###**************####
+    # create statistical overlay layers
+    ###**************####
+    # take in a list of lookup tables
+    # for each, copy RCCF labels layer into a new layer
+    # update the lookup table
+    # will use the same label precomputed file for all
+    for lut_file in overlay_layers:
+        lut_dict = convert_lut_file(lut_file)
+        new_layer = rccf_label_layer.copy()
+        # update the lut
+        new_layer["name"] = os.path.basename(lut_file).split(".")[0]
+        new_layer["segmentColors"] = lut_dict
+        new_layer["visible"] = False
+        new_layer["opacity"] = 0.5
+        data["layers"].append(new_layer)
+
 
     ###*******####
     # edit other (things that are not within data["layers"])
@@ -373,7 +433,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     write_freshscreen_display_json(data, data_file, output_file)
 
 # TODO: handle correct_DMMBA_offset
-def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/color_template.json", data_threshold_max=None, correct_DMBA_offset=False):
+def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, correct_DMBA_offset=False):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -665,7 +725,7 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[]):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -725,9 +785,9 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
     if "color" in filename.lower():
-        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, correct_DMBA_offset=correct_DMBA_offset)
+        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=color_json_template, correct_DMBA_offset=correct_DMBA_offset)
         return
-    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, correct_DMBA_offset=correct_DMBA_offset)
+    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, correct_DMBA_offset=correct_DMBA_offset, overlay_layers=overlay_layers)
 
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], correct_DMBA_offset=False):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
