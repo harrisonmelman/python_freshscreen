@@ -117,7 +117,7 @@
         },
         "tab": "rendering",
         "opacity": 1,
-        "shader": "#uicontrol invlerp normalized(range=[0,15000], window=[0,65535], clamp=false)\nvoid main() {\n  emitGrayscale(normalized());\n}\n",
+        "shader": "#uicontrol invlerp normalized(range=[0,15000], window=[0,65535], clamp=false)\nvoid main() {\n  emitRGB(normalized() * vec3(r, g, b));\n}\n",
         "shaderControls": {
           "normalized": {
             "range": [

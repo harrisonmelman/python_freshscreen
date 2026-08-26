@@ -91,6 +91,7 @@ def get_default_threshold(filename: str):
         "MBP" : (0,1300),
         "autof" : (0,1200),
         "SST" : (0,1000),
+        "mHTT" : (0,6000),
         "NFH" : (0,2000),
         "NPY" : (0,1200),
         "Thy1" : (0,4000),
@@ -138,6 +139,22 @@ def get_default_threshold(filename: str):
         print("WARNING: contrast unknown. using default contrast boundaries of (0,1)")
         return (0,1)
     #return d17gaj40_THRESHOLDS[contrast]
+
+
+def get_default_color_overlay(filename):
+    contrast = get_contrast_from_filename(filename)
+    defaults = {
+        "NeuN" : (0, 1.0, 0),     # green
+        "MBP" : (1.0, 0, 0),      # red
+        "PDE10A": (0, 1.0, 1.0),  # cyan
+        "mHTT": (1.0, 1.0, 0)     # yellow
+    }
+    if contrast in defaults:
+        return defaults[contrast]
+    else:
+        print("WARNING: contrast unknown. using default color of grayscale")
+        return (1.0,1.0,1.0)
+
 
 def convert_dict_to_string(data: dict):
     return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
@@ -274,16 +291,16 @@ def convert_lut_file(label_lut_file):
         # Done this way to safely have 'ROI' as the key field instead of '# ROI'
         original_reader = csv.reader(file,delimiter='\t')
         original_headers = next(original_reader)
-        
+
         # strip whitespace and replace "# ROI" with "ROI"
         cleaned_headers = [h.strip().replace('# ROI', 'ROI') for h in original_headers]
-        
+
         # Skip the comment row
         next(file)
-        
+
         # use dict reader with cleaned headers
         reader = csv.DictReader(file, fieldnames=cleaned_headers, delimiter='\t')
-        
+
         # Now iterate as normal
         for row in reader:
             roi = row['ROI']
@@ -296,7 +313,7 @@ def convert_lut_file(label_lut_file):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, correct_DMBA_offset=False, overlay_layers=[]):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, correct_DMBA_offset=False, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -380,12 +397,13 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
-    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
+    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, correct_DMBA_offset=correct_DMBA_offset, color_overlay=color_overlay)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
     rccf_label_layer = data["layers"][2]
+    # again for labels we do NOT want a single color overlay, they are being colored by RCCF colors (or by statistical overlay)
     rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
 
     ###**************####
@@ -458,9 +476,11 @@ def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dic
     ###**************####
     # layer 0 is red, 1 is green, 2 is blue
     # these are according to the template file neroglancer_json_templates/color_template.json
-    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
-    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
-    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", correct_DMBA_offset=correct_DMBA_offset)
+    # pass color=None here to override the single-channel color overlaying
+    # SORRY for the overloaded names
+    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
+    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
+    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
 
     ###**************####
     # edit rCCF label layer
@@ -533,10 +553,11 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
     return rccf_label_layer
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, correct_DMBA_offset=False):
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, correct_DMBA_offset=False, color_overlay: tuple=(1.0,1.0,1.0)):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
+        color_overlay should be None for RGB color images (like TDI_color) as it is only meant for coloring lightsheet images
     """
     image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix)
 
@@ -559,10 +580,18 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # range is range of data to be rendered on screen
     # window is range of the slider the user can use to edit the range in the GUI
     (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"][0] = min_range
-    image_layer["shaderControls"]["normalized"]["window"][0] = min_range*0.8
-    image_layer["shaderControls"]["normalized"]["range"][1] = max_range
-    image_layer["shaderControls"]["normalized"]["window"][1] = max_range*1.2
+    image_layer["shaderControls"]["normalized"]["range"] = [min_range, max_range]
+    image_layer["shaderControls"]["normalized"]["window"] = [min_range*0.8, max_range*1.2]
+
+    if color_overlay is not None:
+        color_overlay = get_default_color_overlay(data_file)
+        r, g, b = color_overlay
+        image_layer["shader"] = (
+            f"#uicontrol invlerp normalized(range=[{min_range}, {max_range}], clamp=false)\n"
+            f"void main() {{\n"
+            f"  emitRGB(normalized() * vec3({r:.3f}, {g:.3f}, {b:.3f}));\n"
+            f"}}\n"
+        )
 
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, correct_DMBA_offset)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
@@ -725,7 +754,7 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[]):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -787,7 +816,7 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     if "color" in filename.lower():
         write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=color_json_template, correct_DMBA_offset=correct_DMBA_offset)
         return
-    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, correct_DMBA_offset=correct_DMBA_offset, overlay_layers=overlay_layers)
+    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, correct_DMBA_offset=correct_DMBA_offset, overlay_layers=overlay_layers, color_overlay=color_overlay)
 
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], correct_DMBA_offset=False):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
@@ -808,6 +837,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
     for filename in filelist:
         runno = get_runno_from_filename(filename)
         contrast = get_contrast_from_filename(filename)
+        color_overlay = get_default_color_overlay(filename)
         print("contrast == {}".format(contrast))
         if "color" in filename.lower():
             # then we take the dwi nhdr and use that
@@ -838,7 +868,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if not os.path.isfile(label_nhdr_file):
             logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
             exit()
-        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, correct_DMBA_offset=correct_DMBA_offset)
+        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, correct_DMBA_offset=correct_DMBA_offset,color_overlay=color_overlay)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
