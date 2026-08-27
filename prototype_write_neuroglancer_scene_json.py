@@ -141,6 +141,13 @@ def get_default_threshold(filename: str):
     #return d17gaj40_THRESHOLDS[contrast]
 
 
+def get_threshold_from_filedata():
+    # a necessary update to our workflow
+    # instead of relying on assigned default threshold values, I should
+
+    pass
+
+
 def get_default_color_overlay(filename):
     contrast = get_contrast_from_filename(filename)
     defaults = {
@@ -228,7 +235,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
 
-def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, correct_DMBA_offset=False):
+def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=False):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
     # this SHOULD always be 3x3, but no point risking it
     # flatten array so it can be used inside of a lambda easily
@@ -257,7 +264,7 @@ def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_siz
     # NOT appropriate for DMBA aligned data, because it puts Bregma at the center of the neyuroglancer scene
     # IF your data is aligned with DMBA, then you need to factor in a specific translation offset. This will instead put the center of the anterior Commissure at the center of the neuroglancer scene. this more or less matches previous functionality
     # 0.005199037941243297,0.004563725401255936,-4.169626074596984 (in mm)
-    if correct_DMBA_offset:
+    if is_stereotaxic:
         DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
         print(xform_matrix);
         for i in range(len(DMBA_offset_correction)):
@@ -313,7 +320,7 @@ def convert_lut_file(label_lut_file):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, correct_DMBA_offset=False, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=False, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -324,7 +331,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
             - current template was copied from N58204NLSAM_dwi
         data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
-        correct_DMBA_offset -- boolean whether to offset the volume to be centered at Bregma
+        is_stereotaxic -- boolean whether to offset the volume to be centered at Bregma
         overlay_layers -- optional list of lookup table file paths to color the labels with
 
         returns a dict that represents the json file. DON'T (???) have this one also write it to a file. make another function decide where to put it
@@ -397,14 +404,14 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
-    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, correct_DMBA_offset=correct_DMBA_offset, color_overlay=color_overlay)
+    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
     rccf_label_layer = data["layers"][2]
     # again for labels we do NOT want a single color overlay, they are being colored by RCCF colors (or by statistical overlay)
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, is_stereotaxic=is_stereotaxic)
 
     ###**************####
     # create statistical overlay layers
@@ -451,7 +458,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     write_freshscreen_display_json(data, data_file, output_file)
 
 # TODO: handle correct_DMMBA_offset
-def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, correct_DMBA_offset=False):
+def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, is_stereotaxic=False):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -478,15 +485,15 @@ def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dic
     # these are according to the template file neroglancer_json_templates/color_template.json
     # pass color=None here to override the single-channel color overlaying
     # SORRY for the overloaded names
-    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
-    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
-    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", correct_DMBA_offset=correct_DMBA_offset, color_overlay=None)
+    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
+    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
+    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
 
     ###**************####
     # edit rCCF label layer
     ###**************####
     rccf_label_layer = data["layers"][4]
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, correct_DMBA_offset=correct_DMBA_offset)
+    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, is_stereotaxic=is_stereotaxic)
 
     ###*******####
     # edit other (things that are not within data["layers"])
@@ -540,7 +547,7 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
         i+=1
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
-def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, correct_DMBA_offset=False):
+def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, is_stereotaxic=False):
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_precomputed_file)
     rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_precomputed_file), get_contrast_from_filename(label_precomputed_file))
 
@@ -549,11 +556,11 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     update_dimensions(rccf_label_layer, label_voxel_sizes, "inputDimensions", job_id="RCCF label layer")
     update_dimensions(rccf_label_layer, label_voxel_sizes, "outputDimensions", job_id="RCCF label layer")
 
-    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes, correct_DMBA_offset)
+    update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes, is_stereotaxic)
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
     return rccf_label_layer
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, correct_DMBA_offset=False, color_overlay: tuple=(1.0,1.0,1.0)):
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=False, color_overlay: tuple=(1.0,1.0,1.0)):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
@@ -563,7 +570,7 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
 
     # edit the layer name
     # TODO: this solution will probably only work once, for DMBA, today (april 3 2025)
-    if correct_DMBA_offset and "DMBA-LS" in data_file:  # use this as an indicator we are working with a DMBA atlas dataset
+    if is_stereotaxic and "DMBA-LS" in data_file:  # use this as an indicator we are working with a DMBA atlas dataset
         # this is to solve an issue where lsfm datasets are getting named "DMBA-LS CD31" for example, omitting the individual's specimen ID number
         # ONLY RUN ON LSFM DATASETS
         spec_id = data_file.split("_")[1]
@@ -579,6 +586,7 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # update shader controls (default window and level)
     # range is range of data to be rendered on screen
     # window is range of the slider the user can use to edit the range in the GUI
+    breakpoint()
     (min_range,max_range) = get_default_threshold(data_file)
     image_layer["shaderControls"]["normalized"]["range"] = [min_range, max_range]
     image_layer["shaderControls"]["normalized"]["window"] = [min_range*0.8, max_range*1.2]
@@ -593,7 +601,7 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
             f"}}\n"
         )
 
-    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, correct_DMBA_offset)
+    update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, is_stereotaxic)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
 
     return image_layer
@@ -754,7 +762,7 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, correct_DMBA_offset=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -814,11 +822,11 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
     if "color" in filename.lower():
-        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=color_json_template, correct_DMBA_offset=correct_DMBA_offset)
+        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=color_json_template, is_stereotaxic=is_stereotaxic)
         return
-    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, correct_DMBA_offset=correct_DMBA_offset, overlay_layers=overlay_layers, color_overlay=color_overlay)
+    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
 
-def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], correct_DMBA_offset=False):
+def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=False):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
 
     spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
@@ -868,14 +876,14 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if not os.path.isfile(label_nhdr_file):
             logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
             exit()
-        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, correct_DMBA_offset=correct_DMBA_offset,color_overlay=color_overlay)
+        process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, is_stereotaxic=is_stereotaxic,color_overlay=color_overlay)
 
 
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 def main():
-    correct_DMBA_offset=True
+    is_stereotaxic=True
     #Set variable to None if you want to search S3
     label_precomputed_file="DMBA_RCCF_labels.precomputed"
     #label_precomputed_file=None
@@ -893,7 +901,7 @@ def main():
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
         contrast_list=["dwi","gqi-color"]
-        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, correct_DMBA_offset=correct_DMBA_offset, label_precomputed_file=label_precomputed_file)
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, is_stereotaxic=is_stereotaxic, label_precomputed_file=label_precomputed_file)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 main()
