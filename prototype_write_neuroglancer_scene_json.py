@@ -235,7 +235,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
 
-def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=False):
+def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=True):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
     # this SHOULD always be 3x3, but no point risking it
     # flatten array so it can be used inside of a lambda easily
@@ -320,7 +320,7 @@ def convert_lut_file(label_lut_file):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=False, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -458,7 +458,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     write_freshscreen_display_json(data, data_file, output_file)
 
 # TODO: handle correct_DMMBA_offset
-def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, is_stereotaxic=False):
+def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, is_stereotaxic=True):
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
         dirname = os.path.dirname(os.path.realpath(__file__))
@@ -547,7 +547,7 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
         i+=1
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
-def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, is_stereotaxic=False):
+def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, is_stereotaxic=True):
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_precomputed_file)
     rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_precomputed_file), get_contrast_from_filename(label_precomputed_file))
 
@@ -560,7 +560,7 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
     return rccf_label_layer
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=False, color_overlay: tuple=(1.0,1.0,1.0)):
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: tuple=(1.0,1.0,1.0)):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
@@ -762,7 +762,7 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=False, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -826,7 +826,7 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
         return
     write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
 
-def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=False):
+def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=True):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
 
     spec_id_fresh = spec_id.replace("_", "-") # follows freshscreen specifications i.e. no underscores allowed
