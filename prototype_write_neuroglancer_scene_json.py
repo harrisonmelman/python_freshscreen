@@ -21,6 +21,7 @@ import functools
 import glob
 import subprocess
 import csv
+import re
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
 # needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
@@ -67,11 +68,13 @@ def get_runno_from_filename(filename: str):
     logging.warning("unable to find specimen run number from the filename: {}\n\t Will attempt to treat it as an atlas dataset. Setting runno to: {}".format(filename, f[0]))
     return f[0]
 
+
 def get_contrast_from_filename(filename: str):
     # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
     # split on "_" and take the last one
     # split on "." to remove the file extension
     return filename.split("_")[-1].split(".")[0]
+
 
 def get_default_threshold(filename: str):
     """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
@@ -89,6 +92,8 @@ def get_default_threshold(filename: str):
         "color" : (0,128),
         "NeuN" : (0,1500),
         "MBP" : (0,1300),
+        "MOG" : (0,2500),
+        "PDE10A" : (0,2000),
         "autof" : (0,1200),
         "SST" : (0,1000),
         "mHTT" : (0,6000),
@@ -151,20 +156,21 @@ def get_threshold_from_filedata():
 def get_default_color_overlay(filename):
     contrast = get_contrast_from_filename(filename)
     defaults = {
-        "NeuN" : (0, 1.0, 0),     # green
-        "MBP" : (1.0, 0, 0),      # red
-        "PDE10A": (0, 1.0, 1.0),  # cyan
-        "mHTT": (1.0, 1.0, 0)     # yellow
+        "NeuN" : "green",
+        "MBP" : "red",
+        "PDE10A": "cyan",
+        "mHTT": "yellow"
     }
     if contrast in defaults:
         return defaults[contrast]
     else:
         print("WARNING: contrast unknown. using default color of grayscale")
-        return (1.0,1.0,1.0)
+        return "white"
 
 
 def convert_dict_to_string(data: dict):
     return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
+
 
 def write_dict_to_json_file(file: str, data: dict):
     """converts a dict to json format and writes it to the file path provided
@@ -179,6 +185,7 @@ def write_dict_to_json_file(file: str, data: dict):
         # dump writes to file. dumps writes to a string.
         # any other differences? idk
         json.dump(data, f, ensure_ascii=False, cls=NpEncoder)
+
 
 def convert_json_to_url(file: str):
     """file is the path to a json file that contains scene information for neuroglancer
@@ -205,6 +212,7 @@ def convert_json_to_url(file: str):
     logging.info("\n\n{}".format(url))
     return url
 
+
 def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
     """Determines the voxel size (in meters) of an image given the nhdr file as an OrderedDict (already read into an object by nrrd.read_nhdr)
     does not assume isotropic volumes. returns the voxel size of each dimension as an array"""
@@ -220,6 +228,7 @@ def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
         sizes.append(size)
     return sizes
 
+
 def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
     """given a file basename (e.g. 200316-1-1_N10_N58204NLSAM_fa.n5), return the full url (in neuroglancer format) of that file on the d3mof5o s3 bucket
 
@@ -234,6 +243,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
     else:
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
+
 
 def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=True):
     # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
@@ -320,7 +330,7 @@ def convert_lut_file(label_lut_file):
 
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
 # TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
     """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
@@ -457,68 +467,6 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     logging.debug("final form of data dict: \n{}".format(data))
     write_freshscreen_display_json(data, data_file, output_file)
 
-# TODO: handle correct_DMMBA_offset
-def write_color_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str, data_threshold_max=None, is_stereotaxic=True):
-    # check if json_template is relative or abspath and handle it accordingly
-    if not os.path.isabs(json_template):
-        dirname = os.path.dirname(os.path.realpath(__file__))
-        json_template = pathjoin(dirname, json_template)
-        logging.info(dirname)
-
-    if data_threshold_max is None:
-        pass
-
-    data = None
-    with open(json_template) as template:
-        data = json.load(template)
-    if data is None:
-        logging.warning("Unable to read template file: {}".format(json_template))
-        return None
-
-    data_voxel_sizes = get_voxel_size_from_nhdr_dict(data_nhdr)
-    label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
-
-    ###**************####
-    # edit image layers
-    ###**************####
-    # layer 0 is red, 1 is green, 2 is blue
-    # these are according to the template file neroglancer_json_templates/color_template.json
-    # pass color=None here to override the single-channel color overlaying
-    # SORRY for the overloaded names
-    red_image_layer = setup_one_image_layer(data["layers"][0], data_file, data_nhdr, label_nhdr, "setup0/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
-    green_image_layer = setup_one_image_layer(data["layers"][1], data_file, data_nhdr, label_nhdr, "setup1/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
-    blue_image_layer = setup_one_image_layer(data["layers"][2], data_file, data_nhdr, label_nhdr, "setup2/timepoint0", is_stereotaxic=is_stereotaxic, color_overlay=None)
-
-    ###**************####
-    # edit rCCF label layer
-    ###**************####
-    rccf_label_layer = data["layers"][4]
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, is_stereotaxic=is_stereotaxic)
-
-    ###*******####
-    # edit other (things that are not within data["layers"])
-    ###*******####
-    # make the image layer be the default control panel that shows
-    # TODO: this does not work. really don't understand why
-    data["selectedLayer"]["layer"] = red_image_layer["name"]
-    data["selectedLayer"]["visible"] = True
-
-    # set global camera zoom level
-    data["crossSectionScale"] = get_crossSectionScale_factor(data_voxel_sizes[0])
-
-    # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
-    # these could really all be done in the same loop, because the keys will always be [x,y,z] (TODO: confirm this)
-    """i = 0
-    for key in data["layers"][0]["source"]["transform"]["outputDimensions"].keys():
-        data["layers"][0]["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1"""
-    i = 0
-    for key in data["dimensions"].keys():
-        data["dimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
-
-    logging.debug("final form of data dict: \n{}".format(data))
-    write_freshscreen_display_json(data, data_file, output_file)
 
 def get_crossSectionScale_factor(voxel_size):
     # crossSectionScale is a "global" variable to each neuroglancer scene
@@ -535,6 +483,7 @@ def get_crossSectionScale_factor(voxel_size):
     logging.info("setting scale factor to: {}".format(scale_factor))
     return scale_factor
 
+
 def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str, job_id: str=""):
     if dimension_field not in ["inputDimensions", "outputDimensions"]:
         logging.warning("unrecognized dimension field: {}\nCan not write. Only allowed options are: 'inputDimensions' and 'outputDimensions'".format(dimension_field))
@@ -546,6 +495,7 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
         data_layer["source"]["transform"][dimension_field][key][0] = voxel_sizes[i]
         i+=1
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
+
 
 def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, is_stereotaxic=True):
     rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_precomputed_file)
@@ -560,7 +510,8 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
     return rccf_label_layer
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: tuple=(1.0,1.0,1.0)):
+
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white"):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
@@ -586,25 +537,54 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # update shader controls (default window and level)
     # range is range of data to be rendered on screen
     # window is range of the slider the user can use to edit the range in the GUI
-    breakpoint()
     (min_range,max_range) = get_default_threshold(data_file)
     image_layer["shaderControls"]["normalized"]["range"] = [min_range, max_range]
     image_layer["shaderControls"]["normalized"]["window"] = [min_range*0.8, max_range*1.2]
 
-    if color_overlay is not None:
+    if color_overlay is None:
         color_overlay = get_default_color_overlay(data_file)
-        r, g, b = color_overlay
+    if "color" not in data_file:
         image_layer["shader"] = (
-            f"#uicontrol invlerp normalized(range=[{min_range}, {max_range}], clamp=false)\n"
-            f"void main() {{\n"
-            f"  emitRGB(normalized() * vec3({r:.3f}, {g:.3f}, {b:.3f}));\n"
-            f"}}\n"
+            "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n"
+            "#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n"
+            "#uicontrol bool invert checkbox(default=false)\n"
+            f"#uicontrol vec3 color color(default=\"{color_overlay}\")\n"
+            "#uicontrol bool transparent_bg checkbox(default=false)\n\n"
+            "void main() {\n"
+            "  float x = clamp(normalized(), 0.0, 1.0);\n"
+            "  if (invert) x = 1.0 - x;\n"
+            "  x = pow(x, exp2(-log2_gamma));   // log2_gamma > 0 brightens, < 0 darkens\n"
+            "  if (transparent_bg) {\n"
+            "    emitRGBA(vec4(color * x, x));\n"
+            "  } else {\n"
+            "    emitRGB(color * x);\n"
+            "  }\n"
+            "}"
         )
-
+    else:
+        image_layer["shader"] = (
+    """
+    #uicontrol float black slider(min=0, max=1, default=0)
+    #uicontrol float white slider(min=0, max=1, default=1)
+    #uicontrol float gamma slider(min=0.2, max=3, default=1)
+    #uicontrol float saturation slider(min=0, max=3, default=1)
+    #uicontrol float opacity slider(min=0, max=1, default=1)
+    void main() {
+    vec3 rgb = vec3(toNormalized(getDataValue(0)),
+                    toNormalized(getDataValue(1)),
+                    toNormalized(getDataValue(2)));
+    rgb = clamp((rgb - black) / max(white - black, 1e-6), 0.0, 1.0);
+    rgb = pow(rgb, vec3(1.0 / gamma));
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    rgb = clamp(mix(vec3(lum), rgb, saturation), 0.0, 1.0);
+    emitRGBA(vec4(rgb, opacity));
+    }"""
+        )
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, is_stereotaxic)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
 
     return image_layer
+
 
 # also take in the data_file name because it is available to pass, and it is "obfuscated" within the data dict by the N5_PREFIX/PRECOMPUTED_PREFIX
 def write_freshscreen_display_json(data: dict, data_file: str, output_file: str, display_name: str=None):
@@ -631,10 +611,12 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
     organization_json["view_neuroglancerURL"] = convert_json_to_url(convert_dict_to_string(data))
     write_dict_to_json_file(output_file, organization_json)
 
+
 def pathjoin(*args):
     """takes a list of path components and joins them together with forward slashes as the separator
     this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
     return "/".join(args)
+
 
 def find_nhdr_file(n5_file: str):
     """takes as input an n5 file found within s3 (as we are looping over them). tries to find the corresponding nhdr file on s3
@@ -668,6 +650,7 @@ def find_nhdr_file(n5_file: str):
 
     nhdr = nrrd.read_header("{}/{}".format(out_dir, nhdr_file_name))
     return nhdr
+
 
 def find_nhdr_file(runno: str, contrast: str="dwi", local_search_dir: str=None):
     """search for an nhdr file matching both runno and contrast in the schema *${runno}*${contrast}*.nhdr VERY BROAD INCLUSIVE SEARCH (technically, order does not even matter, just runs grep callls in series)
@@ -719,6 +702,7 @@ def find_nhdr_file(runno: str, contrast: str="dwi", local_search_dir: str=None):
     # hopefully the first one in this list is good. (if everything works as expected, it will have length one)
     return filelist[0]
 
+
 # !!! this one ONLY gets heirarchial data from freshscreen.
 # lsd only gets folders. this will only get .n5 and .precomputed datasets
 # will not edit right now, will handle nhdr find code solely in the find_nhdr_file function
@@ -762,7 +746,19 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay=(1.0,1.0,1.0)):
+
+def get_voxel_size_from_color_nhdr(color_nhdr_file):
+    """voxel size (mm) of the 3 spatial axes, read straight from the header text.
+    pynrrd can't read LIST color headers, and the 'none' channel axis can be first or last."""
+    with open(color_nhdr_file) as f:
+        for line in f:
+            if line.startswith('space directions:'):
+                vecs = re.findall(r'\(([^)]*)\)', line)
+                return [max(abs(float(v)) for v in vec.split(',')) for vec in vecs]
+    raise ValueError("no space directions in {}".format(color_nhdr_file))
+
+
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay: str="white"):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -783,24 +779,17 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     contrast = get_contrast_from_filename(filename)
 
     logging.info("data nhdr file = {}".format(data_nhdr_file))
+    # stash the original name away just in case it is a color, will be needed later. will not be used in non-color case
+    color_nhdr_file = data_nhdr_file
     if "color" in data_nhdr_file:
         logging.info("processing COLOR file. Will use the DWI nhdr file for metadata purposes. ")
         search_dir = os.path.dirname(data_nhdr_file)
         data_nhdr_file = find_nhdr_file(runno, "dwi", local_search_dir=search_dir)
     data_nhdr = nrrd.read_header(data_nhdr_file)
     if "color" in filename.lower():
-        # this is necessary because we always use the dwi nhdr file to handle COLOR nhdrs
-        # cause is pynrrd library cannot read the complicated mutli-data-file nhdrs
-        # nhdr use here is only to get metadata such as voxel size, rotation matrix, and translation offset for display purposes
-        # TODO: we are changing to say "tdi5um" instead of the scale factor
-        #if "tdi3" in filename.lower():
-        #    data_nhdr["space directions"] = data_nhdr["space directions"] / 3
-        #if "tdi5" in filename.lower():
-        #    data_nhdr["space directions"] = data_nhdr["space directions"] / 5
-        if "tdi5um" in filename.lower():
-            # TODO: incomplete solution which only works for DMBA
-            # p5robably, just manually set the space directions
-            data_nhdr["space directions"] = data_nhdr["space directions"] / 3
+        color_vox = np.array(get_voxel_size_from_color_nhdr(color_nhdr_file))
+        sd = data_nhdr["space directions"]
+        data_nhdr["space directions"] = sd / np.abs(sd).max(axis=1, keepdims=True) * color_vox[:, None]
     # TODO: find label nhdr on freshscreen
         # do we ever upload label nhdr to freshscreen? how do we distribute labels to people?
     label_nhdr = nrrd.read_header(label_nhdr_file)
@@ -821,10 +810,8 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     logging.info("\tdata nhdr = {}".format(data_nhdr))
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
-    if "color" in filename.lower():
-        write_color_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=color_json_template, is_stereotaxic=is_stereotaxic)
-        return
     write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
+
 
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=True):
     """loops through all n5 or precomputed files in s3 connected to the provided specimen id.  Skips over color files"""
@@ -850,7 +837,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
         if "color" in filename.lower():
             # then we take the dwi nhdr and use that
             # the transform matrix will still be valid but voxel sizes NOT NECESSARILY
-            # below we account for voxel size difference in tdi3 and tdi5 file
+            # later we read vox size directly from the color nhdr
             # this is done because the pynrrd library fails to read in color nhdr files with channels split into separate raw files
             # TODO: finish improving James' nrrd reader replacement and universally use that one
             contrast="dwi"
@@ -874,8 +861,7 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
             exit()
         label_nhdr_file = label_nhdr_file[0].replace("\\","/")
         if not os.path.isfile(label_nhdr_file):
-            logging.error("cannot find label file nhdr locally: {}".format(label_nhdr_file))
-            exit()
+            logging.error
         process_one_image(filename, output_dir, data_nhdr_file, label_nhdr_file, label_precomputed_file, is_stereotaxic=is_stereotaxic,color_overlay=color_overlay)
 
 
@@ -900,7 +886,7 @@ def main():
             nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        contrast_list=["dwi","gqi-color"]
+        contrast_listm=["dwi","gqi-color"]
         loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, is_stereotaxic=is_stereotaxic, label_precomputed_file=label_precomputed_file)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
