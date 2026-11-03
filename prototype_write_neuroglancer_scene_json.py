@@ -441,9 +441,6 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         3) orientation label
             will always be the same file. placement might be a pain"""
     _,data_file = os.path.split(data_file)
-    _,label_file = os.path.split(label_file)
-    print("data_file, label_file, data_nhdr_file, label_nhdr_file, output_file,  json_template")
-    print(data_file, label_file, data_nhdr_file, label_nhdr_file, output_file,  json_template)
     #exit()
     # check if json_template is relative or abspath and handle it accordingly
     if not os.path.isabs(json_template):
@@ -871,8 +868,8 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     label_nhdr = nrrd.read_header(label_nhdr_file)
 
     output_file = pathjoin(output_dir, "{}.json".format(filename))
-    if os.getlogin() == 'hmm56':
-        output_file = pathjoin(output_dir, 'hmm56_reprocessed_json', "{}.json".format(filename))
+    #if os.getlogin() == 'hmm56':
+    #    output_file = pathjoin(output_dir, 'hmm56_reprocessed_json', "{}.json".format(filename))
     #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_precomputed_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_precomputed_file, label_nhdr_file, output_file))
 
     # check if label_precomputed_file is an absolute path or just a filename
@@ -965,7 +962,7 @@ def main():
             nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
             output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
         # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        contrast_listm=["dwi","gqi-color"]
+        contrast_list=["dwi","gqi-color"]
         loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, is_stereotaxic=is_stereotaxic, label_precomputed_file=label_precomputed_file)
     else:
         logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
