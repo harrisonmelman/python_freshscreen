@@ -22,6 +22,7 @@ import glob
 import subprocess
 import csv
 import re
+import zarr
 
 # GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
 # needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
@@ -74,6 +75,76 @@ def get_contrast_from_filename(filename: str):
     # split on "_" and take the last one
     # split on "." to remove the file extension
     return filename.split("_")[-1].split(".")[0]
+
+
+def _pick_array(node, max_voxels):
+    """Return an array to sample: the node itself, or the best pyramid level in a group."""
+    if isinstance(node, zarr.Array):
+        return node
+    levels = sorted(
+        (k for k in node.array_keys() if re.fullmatch(r"s\d+", k)),
+        key=lambda k: int(k[1:]),
+    )
+    if not levels:
+        raise ValueError(f"No array or s0/s1/... pyramid levels found in {node.name!r}")
+    # Finest level that fits the voxel budget; otherwise the coarsest available
+    for k in levels:
+        if node[k].size <= max_voxels:
+            return node[k]
+    return node[levels[-1]]
+
+
+def _sample_chunks(arr, max_voxels, rng):
+    """Read a random subset of whole chunks (cheap: each chunk is read once)."""
+    grid = [int(np.ceil(s / c)) for s, c in zip(arr.shape, arr.chunks)]
+    n_chunks = int(np.prod(grid))
+    voxels_per_chunk = int(np.prod(arr.chunks))
+    n = max(1, min(n_chunks, max_voxels // voxels_per_chunk))
+    picks = rng.choice(n_chunks, size=n, replace=False)
+
+    samples = []
+    for flat in picks:
+        idx = np.unravel_index(flat, grid)
+        sl = tuple(
+            slice(i * c, min((i + 1) * c, s))
+            for i, c, s in zip(idx, arr.chunks, arr.shape)
+        )
+        samples.append(np.asarray(arr[sl]).ravel())
+    return np.concatenate(samples)
+
+
+
+def compute_display_range(n5_path,dataset="setup0/timepoint0",max_voxels=2000000,lower_pct=0.5,upper_pct=99.5,ignore_value=0,seed=0):
+    root = zarr.open(zarr.N5Store(n5_path), mode="r")
+    node = root[dataset] if dataset else root
+    arr = _pick_array(node, max_voxels)
+
+    rng = np.random.default_rng(seed)
+    if arr.size <= max_voxels:
+        data = np.asarray(arr[:]).ravel()
+    else:
+        data = _sample_chunks(arr, max_voxels, rng)
+
+    if np.issubdtype(data.dtype, np.floating):
+        data = data[np.isfinite(data)]
+    if ignore_value is not None:
+        data = data[data != ignore_value]
+
+    if data.size == 0:
+        # Nothing usable sampled: fall back to the dtype's natural range
+        if np.issubdtype(arr.dtype, np.integer):
+            info = np.iinfo(arr.dtype)
+            return {"range": [float(info.min), float(info.max)],
+                    "window": [float(info.min), float(info.max)]}
+        return {"range": [0.0, 1.0], "window": [0.0, 1.0]}
+
+    lo, hi = np.percentile(data, [lower_pct, upper_pct])
+    if hi <= lo:  # constant data
+        hi = lo + 1
+    return {
+        "range": [float(lo), float(hi)],
+        "window": [float(min(data.min(), lo)), float(max(data.max(), hi))],
+    }
 
 
 def get_default_threshold(filename: str):
@@ -145,12 +216,6 @@ def get_default_threshold(filename: str):
         return (0,1)
     #return d17gaj40_THRESHOLDS[contrast]
 
-
-def get_threshold_from_filedata():
-    # a necessary update to our workflow
-    # instead of relying on assigned default threshold values, I should
-
-    pass
 
 
 def get_default_color_overlay(filename):
@@ -414,7 +479,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     ###**************####"
     # data["layers"][1] is the image volume
     image_layer = data["layers"][1]
-    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay)
+    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay, n5file_dir=os.path.dirname(output_file))
 
     ###**************####
     # edit rCCF label layer
@@ -511,13 +576,14 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     return rccf_label_layer
 
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white"):
+def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white", n5file_dir=None):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
         color_overlay should be None for RGB color images (like TDI_color) as it is only meant for coloring lightsheet images
     """
     image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix)
+    local_n5_file = pathjoin(n5file_dir, data_file)
 
     # edit the layer name
     # TODO: this solution will probably only work once, for DMBA, today (april 3 2025)
@@ -537,9 +603,12 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # update shader controls (default window and level)
     # range is range of data to be rendered on screen
     # window is range of the slider the user can use to edit the range in the GUI
-    (min_range,max_range) = get_default_threshold(data_file)
-    image_layer["shaderControls"]["normalized"]["range"] = [min_range, max_range]
-    image_layer["shaderControls"]["normalized"]["window"] = [min_range*0.8, max_range*1.2]
+    # data file is n5 file basename
+    # assume it exists within freshscreen library -- the output dir (where we will write the output json)
+    # TODO: i should also look at the s3 bucket to find the data. maybe i am updating a file that has already been deleted off the local bucket
+    # useful for updating/reprocessing old data which may come to be necessary
+    image_layer["shaderControls"]["normalized"].update(compute_display_range(local_n5_file))
+
 
     if color_overlay is None:
         color_overlay = get_default_color_overlay(data_file)
@@ -785,6 +854,7 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
         logging.info("processing COLOR file. Will use the DWI nhdr file for metadata purposes. ")
         search_dir = os.path.dirname(data_nhdr_file)
         data_nhdr_file = find_nhdr_file(runno, "dwi", local_search_dir=search_dir)
+    #breakpoint()
     data_nhdr = nrrd.read_header(data_nhdr_file)
     if "color" in filename.lower():
         color_vox = np.array(get_voxel_size_from_color_nhdr(color_nhdr_file))
@@ -795,6 +865,8 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     label_nhdr = nrrd.read_header(label_nhdr_file)
 
     output_file = pathjoin(output_dir, "{}.json".format(filename))
+    if os.getlogin() == 'hmm56':
+        output_file = pathjoin(output_dir, 'hmm56_reprocessed_json', "{}.json".format(filename))
     #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_precomputed_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_precomputed_file, label_nhdr_file, output_file))
 
     # check if label_precomputed_file is an absolute path or just a filename
