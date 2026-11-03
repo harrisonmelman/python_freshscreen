@@ -117,7 +117,7 @@
         },
         "tab": "rendering",
         "opacity": 1,
-        "shader": "#uicontrol invlerp normalized(range=[0,15000], window=[0,65535], clamp=false)\nvoid main() {\n  emitRGB(normalized() * vec3(r, g, b));\n}\n",
+        "shader": "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n#uicontrol bool invert checkbox(default=false)\n#uicontrol vec3 color color(default=\"white\")\n#uicontrol bool transparent_bg checkbox(default=false)\n\nvoid main() {\n  float x = clamp(normalized(), 0.0, 1.0);\n  if (invert) x = 1.0 - x;\n  x = pow(x, exp2(-log2_gamma));   // log2_gamma > 0 brightens, < 0 darkens\n  if (transparent_bg) {\n    emitRGBA(vec4(color * x, x));\n  } else {\n    emitRGB(color * x);\n  }\n}",
         "shaderControls": {
           "normalized": {
             "range": [
