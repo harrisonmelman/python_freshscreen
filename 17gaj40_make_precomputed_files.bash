@@ -21,6 +21,8 @@ for x in BTBR C57BL_6J CAST DB2; do
         # everything after is the runno (but also trim the trailing slash)
         label_dir=${in_dir}/${x}/Done/${y}/labels*/${label_type};
         spec_id_fresh=${y%_*};
+        echo $spec_id_fresh;
+        continue;
         runno=${y##*_};
         runno=${runno%/*};
 

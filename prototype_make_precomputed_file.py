@@ -73,9 +73,9 @@ def make_precomputed(nhdr_file: str, out_file: str):
 	)"""
 
 	# If you're using amazon or the local file system, you can replace 'gs' with 's3' or 'file'
-	#vol = CloudVolume('s3://d3mof5o/TESTING_N58204NLSAM_RCCF_labels.precomputed', info=info)
+	vol = CloudVolume('s3://d3mof5o/ABA_CCF_labels_2022.precomputed', info=info)
 	#vol = CloudVolume('file://{}/N57205NLSAM_RCCF_labels.precomputed'.format(data_dir), info=info)
-	vol = CloudVolume('file://{}'.format(out_file), info=info)
+	#vol = CloudVolume('file://{}'.format(out_file), info=info)
 
 	# info (dict, rw) - Python dict representation of Neuroglancer info JSON file. You must call vol.commit_info() to save your changes to storage.
 	vol.commit_info()
