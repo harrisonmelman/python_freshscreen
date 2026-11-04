@@ -396,18 +396,45 @@ def convert_lut_file(label_lut_file):
             roi_dict[roi] = hex_color
     return roi_dict
 
+
+def load_segment_colors(label_type: str="RCCF"):
+    """returns the dict of label ROI number -> hex color stored in data/segment_colors/{label_type}.json"""
+    code_dir = os.path.dirname(os.path.realpath(__file__))
+    with open(pathjoin(code_dir, "data", "segment_colors", "{}.json".format(label_type))) as f:
+        return json.load(f)
+
+
+def make_empty_transform():
+    """returns a neuroglancer source transform for update_dimensions and update_matrix_transform to fill in"""
+    return {
+        "matrix": [[0, 0, 0, 0] for _ in range(3)],
+        "inputDimensions": {axis: [0, "m"] for axis in "xyz"},
+        "outputDimensions": {axis: [0, "m"] for axis in "xyz"},
+    }
+
+
+def make_scene(layers: list, voxel_sizes: list, cross_section_scale: float):
+    """returns the dict for a full neuroglancer scene. layers[0] must be the image layer, which is what opens in the side panel"""
+    return {
+        "dimensions": {axis: [size, "m"] for axis, size in zip("xyz", voxel_sizes)},
+        "position": [0, 0, 0],
+        "crossSectionScale": cross_section_scale,
+        "projectionScale": 2048,
+        "layers": layers,
+        "selectedLayer": {"size": 677, "visible": True, "layer": layers[0]["name"]},
+        "layout": "4panel",
+    }
+
+
 # TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
-# TODO: handle the orientation label layer data["layers"][0] -- currently keeping this one hidden
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str,  json_template: str="data/neuroglancer_json_templates/DMBA_template.json", data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
-    """Function to write a json file for our most typical use case: one image volume, one labelset, and one orientation label layer
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+    """Function to write a json file for our most typical use case: one image volume and one labelset
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
         label_precomputed_file -- name of the root folder of label file, as it sits on S3
         data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
         label_nhdr -- analogous to data_nhdr for label_precomputed_file
         output_file -- the freshscreen display json file to eventually write to.
-        json_template -- a local file to act as json template. this script will add and edit what it needs to, but will not delete anything it does not have to. this could be useful for adding future functionality (just by chanign default template)
-            - current template was copied from N58204NLSAM_dwi
         data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
         is_stereotaxic -- boolean whether to offset the volume to be centered at Bregma
         overlay_layers -- optional list of lookup table file paths to color the labels with
@@ -420,11 +447,11 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         - the data is stored on the d3mof5o AWS S3 bucket and follows all freshscreen organization conventions
         - file (actually a directory) ends in .precomputed or .n5. will infer which one it is based on the extension
 
-        - layer[0] is orientation label
-        - layer[1] is image volume
-        - layer[2] is segmentation volume"""
+        - layer[0] is image volume
+        - layer[1] is segmentation volume
+        - any statistical overlay layers come after that"""
 
-    """function to write json for our most typical use case: three layers
+    """function to write json for our most typical use case: two layers
         1) the contrast of interest
             different for each contrast
             need to update:
@@ -437,29 +464,13 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
                 shader - volume only
                 shader controls - volume only
         2) labelset
-            one for each SPECIMEN. should be the same parameters for all (except origin transform)
-        3) orientation label
-            will always be the same file. placement might be a pain"""
+            one for each SPECIMEN. should be the same parameters for all (except origin transform)"""
     _,data_file = os.path.split(data_file)
     #exit()
-    # check if json_template is relative or abspath and handle it accordingly
-    if not os.path.isabs(json_template):
-        dirname = os.path.dirname(os.path.realpath(__file__))
-        json_template = pathjoin(dirname, json_template)
-        logging.info(dirname)
 
     # TODO
     if data_threshold_max is None:
         pass
-
-    # starting point is a representative template file
-    # we load that in as a dict and edit the fields accordingly
-    data = None
-    with open(json_template) as template:
-        data = json.load(template)
-    if data is None:
-        logging.warning("Unable to read template file: {}".format(json_template))
-        return None
 
     # these are dicts representing the local data
     """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
@@ -479,18 +490,16 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
 
     ###**************####
-    # edit image layer
+    # create image layer
     ###**************####"
-    # data["layers"][1] is the image volume
-    image_layer = data["layers"][1]
-    image_layer = setup_one_image_layer(image_layer, data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay, n5file_dir=os.path.dirname(output_file))
+    image_layer = setup_one_image_layer(data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay, n5file_dir=os.path.dirname(output_file))
 
     ###**************####
-    # edit rCCF label layer
+    # create rCCF label layer
     ###**************####
-    rccf_label_layer = data["layers"][2]
     # again for labels we do NOT want a single color overlay, they are being colored by RCCF colors (or by statistical overlay)
-    rccf_label_layer = setup_rccf_label_layer(rccf_label_layer, label_precomputed_file, label_nhdr, is_stereotaxic=is_stereotaxic)
+    rccf_label_layer = setup_rccf_label_layer(label_precomputed_file, label_nhdr, is_stereotaxic=is_stereotaxic)
+    layers = [image_layer, rccf_label_layer]
 
     ###**************####
     # create statistical overlay layers
@@ -507,30 +516,9 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         new_layer["segmentColors"] = lut_dict
         new_layer["visible"] = False
         new_layer["opacity"] = 0.5
-        data["layers"].append(new_layer)
+        layers.append(new_layer)
 
-    ###*******####
-    # edit other (things that are not within data["layers"])
-    ###*******####
-    # make the image layer be the default control panel that shows
-    # TODO: this does not work. really don't understand why
-    data["selectedLayer"]["layer"] = image_layer["name"]
-    data["selectedLayer"]["visible"] = True
-
-    data["crossSectionScale"] = get_crossSectionScale_factor(data_voxel_sizes[0])
-
-
-
-    # also change output voxel size for the orientation label -- maybe this is where my scene is getting confused
-    # these could really all be done in the same loop, because the keys will always be [x,y,z] (TODO: confirm this)
-    """i = 0
-    for key in data["layers"][0]["source"]["transform"]["outputDimensions"].keys():
-        data["layers"][0]["source"]["transform"]["outputDimensions"][key][0] = label_voxel_sizes[i]
-        i+=1"""
-    i = 0
-    for key in data["dimensions"].keys():
-        data["dimensions"][key][0] = label_voxel_sizes[i]
-        i+=1
+    data = make_scene(layers, label_voxel_sizes, get_crossSectionScale_factor(data_voxel_sizes[0]))
 
     logging.debug("final form of data dict: \n{}".format(data))
     write_freshscreen_display_json(data, data_file, output_file)
@@ -565,9 +553,22 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
 
-def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, label_nhdr: str, is_stereotaxic=True):
-    rccf_label_layer["source"]["url"] = get_s3_url_from_file_basename(label_precomputed_file)
-    rccf_label_layer["name"] = "{} {}".format(get_runno_from_filename(label_precomputed_file), get_contrast_from_filename(label_precomputed_file))
+def setup_rccf_label_layer(label_precomputed_file: str, label_nhdr: str, is_stereotaxic=True):
+    rccf_label_layer = {
+        "type": "segmentation",
+        "source": {
+            "url": get_s3_url_from_file_basename(label_precomputed_file),
+            "transform": make_empty_transform(),
+            "subsources": {"default": True, "bounds": False, "properties": True, "mesh": True},
+            "enableDefaultSubsources": False,
+        },
+        "tab": "source",
+        "selectedAlpha": 0.6,
+        "notSelectedAlpha": 0.1,
+        "ignoreNullVisibleSet": False,
+        "name": "{} {}".format(get_runno_from_filename(label_precomputed_file), get_contrast_from_filename(label_precomputed_file)),
+        "segmentColors": load_segment_colors("RCCF"),
+    }
 
     label_voxel_sizes = get_voxel_size_from_nhdr_dict(label_nhdr)
 
@@ -579,13 +580,21 @@ def setup_rccf_label_layer(rccf_label_layer: dict, label_precomputed_file: str, 
     return rccf_label_layer
 
 
-def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white", n5file_dir=None):
+def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white", n5file_dir=None):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
         color_overlay should be None for RGB color images (like TDI_color) as it is only meant for coloring lightsheet images
     """
-    image_layer["source"]["url"] = get_s3_url_from_file_basename(data_file, n5_suffix)
+    image_layer = {
+        "type": "image",
+        "source": {
+            "url": get_s3_url_from_file_basename(data_file, n5_suffix),
+            "transform": make_empty_transform(),
+        },
+        "tab": "rendering",
+        "opacity": 1,
+    }
     local_n5_file = pathjoin(n5file_dir, data_file)
 
     # edit the layer name
@@ -610,7 +619,7 @@ def setup_one_image_layer(image_layer: dict, data_file: str, data_nhdr: dict, la
     # assume it exists within freshscreen library -- the output dir (where we will write the output json)
     # TODO: i should also look at the s3 bucket to find the data. maybe i am updating a file that has already been deleted off the local bucket
     # useful for updating/reprocessing old data which may come to be necessary
-    image_layer["shaderControls"]["normalized"].update(compute_display_range(local_n5_file))
+    image_layer["shaderControls"] = {"normalized": compute_display_range(local_n5_file)}
 
 
     if color_overlay is None:
@@ -671,12 +680,7 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
     organization_json["object_Name"] = data_file
     # if user does not specify, then look to see what I named this layer in neuroglancer and use that
     if display_name is None:
-        # if the neuroglancer name is the default "timepointN", then don't use that and just use the full filename
-        # TODO: this might? wreck havoc on color files, but i am not handling those right now anyways. so it's ok..?
-        if "timepoint" in data["layers"][1]["name"].lower():
-            organization_json["object_displayName"] = data_file
-        else:
-            organization_json["object_displayName"] = data["layers"][1]["name"]
+        organization_json["object_displayName"] = data["layers"][0]["name"]
     else:
         organization_json["object_displayName"] = display_name
 
@@ -830,7 +834,7 @@ def get_voxel_size_from_color_nhdr(color_nhdr_file):
     raise ValueError("no space directions in {}".format(color_nhdr_file))
 
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, json_template: str="data/neuroglancer_json_templates/DMBA_template.json", color_json_template: str="data/neuroglancer_json_templates/color_template.json", overlay_layers=[], color_overlay: str="white"):
+def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
     filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
@@ -885,7 +889,7 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
     logging.info("\tdata nhdr = {}".format(data_nhdr))
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
-    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, json_template=json_template, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
+    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
 
 
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=True):
@@ -944,28 +948,45 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
 # MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # WARNING: main is not currently used in the pipeline. write_three_layer_json is called straight from $WORKSTATION_CODE/shared/Freshscreen_codes/prepare1image.py (harry)
+# as of 2026 november 3, I am using this main function as the tester
+# use 24.chdi.01 as the test set. relatively lowres so will run fast
+# as of today testing on personal mac, to test full pipeline (including precomputed gen)
+# BUT this does rely on the n5 file already being created. that is why i originally put the test script into prepare1image, since it handles the full pipeline
+# SO just keep that in mind. this is only good for testing JSON creation assuming the n5 is already generated. if not, see above.
 def main():
-    is_stereotaxic=True
-    #Set variable to None if you want to search S3
-    label_precomputed_file="DMBA_RCCF_labels.precomputed"
-    #label_precomputed_file=None
-    logging.getLogger().setLevel(logging.INFO)
-    if len(sys.argv) > 2:
-        # i am not even using project_code
-        project_code = sys.argv[1]
-        specimen_id = sys.argv[2]
-        if len(sys.argv) > 4:
-            # then I do not want to use the typical R drive organization, instead pass an nhdr_dir(input) and out_dir
-            nhdr_dir = sys.argv[3]
-            output_dir = sys.argv[4]
-        else:
-            nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
-            output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
-        # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
-        contrast_list=["dwi","gqi-color"]
-        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, is_stereotaxic=is_stereotaxic, label_precomputed_file=label_precomputed_file)
+    is_citrix=False
+    group = "15mo-WT-M"
+    contrast_list = ["dwi", "gqi-color"]
+    contrast_long_list = ["N02_dwi", "N07_gqi-color"]
+
+    if is_citrix:
+        fslib=f"B:/Freshscreen_Library/hmm56_test"
+        input_dir=f"B:/24.chdi.01-PHASE2/AVG/{group}/Aligned-Data"
     else:
-        logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
+        fslib=f"/Users/harry/Documents/work/example_chdi_data/freshscreen_library"
+        input_dir=f"/Users/harry/Documents/work/example_chdi_data/{group}/Aligned-Data"
+
+    fs_library_path = fslib
+    is_stereotaxic = True 
+    #dwi
+    contrast = "dwi"
+    contrast_long = "N02_dwi"
+    n5_filename=f"{group}_{contrast_long}.n5"
+    library_nhdr_path = f"{input_dir}/{group}_{contrast}.nhdr"
+    library_label_path = f"{input_dir}/labels/RCCF/{group}_RCCF_labels.nhdr"
+    library_precomputed_label_path = f"{group}_RCCF_labels.precomputed"
+    process_one_image(n5_filename, fs_library_path, library_nhdr_path, library_label_path, label_precomputed_file=library_precomputed_label_path, is_stereotaxic=is_stereotaxic)
+
+
+    #gqi-color
+    contrast = "gqi-color"
+    contrast_ = "gqi_color"
+    contrast_long = "N07_gqi-color"
+    n5_filename=f"{group}_{contrast_long}.n5"
+    library_nhdr_path = f"{input_dir}/{group}_{contrast_}.nhdr"
+    library_label_path = f"{input_dir}/labels/RCCF/{group}_RCCF_labels.nhdr"
+    library_precomputed_label_path = f"{group}_RCCF_labels.precomputed"
+    process_one_image(n5_filename, fs_library_path, library_nhdr_path, library_label_path, label_precomputed_file=library_precomputed_label_path, is_stereotaxic=is_stereotaxic)
 
 
 if __name__ == "__main__":
