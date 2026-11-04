@@ -426,21 +426,18 @@ def make_scene(layers: list, voxel_sizes: list, cross_section_scale: float):
     }
 
 
-# TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
-    """Function to write a json file for our most typical use case: one image volume and one labelset
+def single_image_scene(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, n5_dir: str, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+    """Function to build the scene for our most typical use case: one image volume and one labelset
         inputs:
         data_file -- name of the root folder of data file, as it sits on S3
         label_precomputed_file -- name of the root folder of label file, as it sits on S3
         data_nhdr -- path to nhdr file for the data. necessary to pull metadata from
         label_nhdr -- analogous to data_nhdr for label_precomputed_file
-        output_file -- the freshscreen display json file to eventually write to.
-        data_threshold_max -- upper bound for data rendering on freshscreen. default is None [TESTING ONLY]
+        n5_dir -- local folder holding data_file, used to compute the default display range
         is_stereotaxic -- boolean whether to offset the volume to be centered at Bregma
         overlay_layers -- optional list of lookup table file paths to color the labels with
 
-        returns a dict that represents the json file. DON'T (???) have this one also write it to a file. make another function decide where to put it
-        # actually it is not really necessary to save this as a json file. instead it could return the url encoded string? unsure. does not matter right now
+        returns a dict that represents the neuroglancer scene. writing it is left to the caller
 
 
         assumptions:
@@ -466,11 +463,6 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
         2) labelset
             one for each SPECIMEN. should be the same parameters for all (except origin transform)"""
     _,data_file = os.path.split(data_file)
-    #exit()
-
-    # TODO
-    if data_threshold_max is None:
-        pass
 
     # these are dicts representing the local data
     """data_nhdr is an ORDERED DICT -- keys are identical to those in the nhdr file
@@ -492,7 +484,7 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     ###**************####
     # create image layer
     ###**************####"
-    image_layer = setup_one_image_layer(data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay, n5file_dir=os.path.dirname(output_file))
+    image_layer = setup_one_image_layer(data_file, data_nhdr, label_nhdr, is_stereotaxic=is_stereotaxic, color_overlay=color_overlay, n5file_dir=n5_dir)
 
     ###**************####
     # create rCCF label layer
@@ -521,7 +513,17 @@ def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr:
     data = make_scene(layers, label_voxel_sizes, get_crossSectionScale_factor(data_voxel_sizes[0]))
 
     logging.debug("final form of data dict: \n{}".format(data))
-    write_freshscreen_display_json(data, data_file, output_file)
+    return data
+
+
+# TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+    """builds the scene for one image volume and writes it to output_file as a freshscreen display json
+
+    the n5 file is expected to be in the same folder as output_file. data_threshold_max is not used"""
+    _,data_file = os.path.split(data_file)
+    scene = single_image_scene(data_file, label_precomputed_file, data_nhdr, label_nhdr, os.path.dirname(output_file), is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
+    write_freshscreen_display_json(scene, data_file, output_file)
 
 
 def get_crossSectionScale_factor(voxel_size):
@@ -947,46 +949,30 @@ def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
 # MAIN with command line arguments
 #******!*!*!*!*!*!*!*!*!*!*!*!!*****************#
-# WARNING: main is not currently used in the pipeline. write_three_layer_json is called straight from $WORKSTATION_CODE/shared/Freshscreen_codes/prepare1image.py (harry)
-# as of 2026 november 3, I am using this main function as the tester
-# use 24.chdi.01 as the test set. relatively lowres so will run fast
-# as of today testing on personal mac, to test full pipeline (including precomputed gen)
-# BUT this does rely on the n5 file already being created. that is why i originally put the test script into prepare1image, since it handles the full pipeline
-# SO just keep that in mind. this is only good for testing JSON creation assuming the n5 is already generated. if not, see above.
+# WARNING: main is not currently used in the pipeline. process_one_image is called straight from $WORKSTATION_CODE/shared/Freshscreen_codes/prepare1image.py (harry)
+# the real-data test that used to live here is now tests/test_scenes.py
 def main():
-    is_citrix=False
-    group = "15mo-WT-M"
-    contrast_list = ["dwi", "gqi-color"]
-    contrast_long_list = ["N02_dwi", "N07_gqi-color"]
-
-    if is_citrix:
-        fslib=f"B:/Freshscreen_Library/hmm56_test"
-        input_dir=f"B:/24.chdi.01-PHASE2/AVG/{group}/Aligned-Data"
+    is_stereotaxic=True
+    #Set variable to None if you want to search S3
+    label_precomputed_file="DMBA_RCCF_labels.precomputed"
+    #label_precomputed_file=None
+    logging.getLogger().setLevel(logging.INFO)
+    if len(sys.argv) > 2:
+        # i am not even using project_code
+        project_code = sys.argv[1]
+        specimen_id = sys.argv[2]
+        if len(sys.argv) > 4:
+            # then I do not want to use the typical R drive organization, instead pass an nhdr_dir(input) and out_dir
+            nhdr_dir = sys.argv[3]
+            output_dir = sys.argv[4]
+        else:
+            nhdr_dir = "Q:/{}/{}/Aligned-Data".format(project_code, specimen_id)
+            output_dir = "S:/freshscreen_library/json_display_files/{}".format(specimen_id)
+        # TODO: smartly determine what system we are on. windows or mac? -- should always be citrix really
+        contrast_list=["dwi","gqi-color"]
+        loop_through_specimen_in_freshscreen(specimen_id, output_dir, nhdr_dir, contrast_list=contrast_list, is_stereotaxic=is_stereotaxic, label_precomputed_file=label_precomputed_file)
     else:
-        fslib=f"/Users/harry/Documents/work/example_chdi_data/freshscreen_library"
-        input_dir=f"/Users/harry/Documents/work/example_chdi_data/{group}/Aligned-Data"
-
-    fs_library_path = fslib
-    is_stereotaxic = True 
-    #dwi
-    contrast = "dwi"
-    contrast_long = "N02_dwi"
-    n5_filename=f"{group}_{contrast_long}.n5"
-    library_nhdr_path = f"{input_dir}/{group}_{contrast}.nhdr"
-    library_label_path = f"{input_dir}/labels/RCCF/{group}_RCCF_labels.nhdr"
-    library_precomputed_label_path = f"{group}_RCCF_labels.precomputed"
-    process_one_image(n5_filename, fs_library_path, library_nhdr_path, library_label_path, label_precomputed_file=library_precomputed_label_path, is_stereotaxic=is_stereotaxic)
-
-
-    #gqi-color
-    contrast = "gqi-color"
-    contrast_ = "gqi_color"
-    contrast_long = "N07_gqi-color"
-    n5_filename=f"{group}_{contrast_long}.n5"
-    library_nhdr_path = f"{input_dir}/{group}_{contrast_}.nhdr"
-    library_label_path = f"{input_dir}/labels/RCCF/{group}_RCCF_labels.nhdr"
-    library_precomputed_label_path = f"{group}_RCCF_labels.precomputed"
-    process_one_image(n5_filename, fs_library_path, library_nhdr_path, library_label_path, label_precomputed_file=library_precomputed_label_path, is_stereotaxic=is_stereotaxic)
+        logging.warning("Not enough input arguments. Requires project_code, specimen_id, and nhdr_dir as positional arguments")
 
 
 if __name__ == "__main__":
