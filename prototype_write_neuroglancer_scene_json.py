@@ -297,7 +297,7 @@ def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
     return sizes
 
 
-def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
+def get_s3_url_from_file_basename(filename: str):
     """given a file basename (e.g. 200316-1-1_N10_N58204NLSAM_fa.n5), return the full url (in neuroglancer format) of that file on the d3mof5o s3 bucket
 
     This function determines if the file is of type n5 or precomputed, and builds the path accordingly"""
@@ -305,7 +305,7 @@ def get_s3_url_from_file_basename(filename: str, n5_suffix: str=N5_SUFFIX):
     # TODO: test to ensure that os.path.join always does the right job here. PROBABLY fails on windows
     suffix = filename.split(".")[-1]
     if "n5" in suffix:
-        return pathjoin(N5_PREFIX, filename, n5_suffix)
+        return pathjoin(N5_PREFIX, filename, N5_SUFFIX)
     elif "precomputed" in suffix:
         return pathjoin(PRECOMPUTED_PREFIX, filename)
     else:
@@ -349,7 +349,7 @@ def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_siz
             xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
 
 # a "fix" to make sure the coronal view in neuroglacner is right side up
-def flip_xform_dimension(xform_matrix: dict, dim: int=2):
+def flip_xform_dimension(xform_matrix: dict):
     image_matrix_numpy_array = np.asarray(xform_matrix)
     flip_row_index = np.argmax(image_matrix_numpy_array[:,2] != 0)
     # flip sign of each value in the found row
@@ -577,11 +577,11 @@ def setup_rccf_label_layer(label_precomputed_file: str, label_nhdr: str, is_ster
     update_dimensions(rccf_label_layer, label_voxel_sizes, "outputDimensions", job_id="RCCF label layer")
 
     update_matrix_transform(rccf_label_layer["source"]["transform"]["matrix"], label_nhdr, label_voxel_sizes, is_stereotaxic)
-    flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"], 2)
+    flip_xform_dimension(rccf_label_layer["source"]["transform"]["matrix"])
     return rccf_label_layer
 
 
-def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_suffix: str=N5_SUFFIX, is_stereotaxic=True, color_overlay: str="white", n5file_dir=None):
+def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, is_stereotaxic=True, color_overlay: str="white", n5file_dir=None):
     """sets up one data layer in a neuroglancer scene
     call this one for a typical scene with one volume
     called three times for color images (1x per channel)
@@ -590,7 +590,7 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_
     image_layer = {
         "type": "image",
         "source": {
-            "url": get_s3_url_from_file_basename(data_file, n5_suffix),
+            "url": get_s3_url_from_file_basename(data_file, N5_SUFFIX),
             "transform": make_empty_transform(),
         },
         "tab": "rendering",
@@ -665,7 +665,7 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_
     }"""
         )
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, is_stereotaxic)
-    flip_xform_dimension(image_layer["source"]["transform"]["matrix"], 2)
+    flip_xform_dimension(image_layer["source"]["transform"]["matrix"])
 
     return image_layer
 
