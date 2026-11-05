@@ -516,11 +516,10 @@ def single_image_scene(data_file: str, label_precomputed_file: str, data_nhdr: d
     return data
 
 
-# TODO: data_threshold_max by default currently looks at a dict of deafult values. eventually, do NOT allow this. force user to pass a decent value to this function
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, data_threshold_max=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
     """builds the scene for one image volume and writes it to output_file as a freshscreen display json
 
-    the n5 file is expected to be in the same folder as output_file. data_threshold_max is not used"""
+    the n5 file is expected to be in the same folder as output_file."""
     _,data_file = os.path.split(data_file)
     scene = single_image_scene(data_file, label_precomputed_file, data_nhdr, label_nhdr, os.path.dirname(output_file), is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
     write_freshscreen_display_json(scene, data_file, output_file)
@@ -621,12 +620,12 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_
     # assume it exists within freshscreen library -- the output dir (where we will write the output json)
     # TODO: i should also look at the s3 bucket to find the data. maybe i am updating a file that has already been deleted off the local bucket
     # useful for updating/reprocessing old data which may come to be necessary
-    image_layer["shaderControls"] = {"normalized": compute_display_range(local_n5_file)}
-
+    display_range = compute_display_range(local_n5_file)
 
     if color_overlay is None:
         color_overlay = get_default_color_overlay(data_file)
     if "color" not in data_file:
+        image_layer["shaderControls"] = {"normalized": display_range}
         image_layer["shader"] = (
             "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n"
             "#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n"
@@ -645,6 +644,8 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, n5_
             "}"
         )
     else:
+        image_layer["shaderControls"] = {"black": display_range["range"][0]/255}
+        image_layer["shaderControls"] = {"white": display_range["range"][1]/255}
         image_layer["shader"] = (
     """
     #uicontrol float black slider(min=0, max=1, default=0)
