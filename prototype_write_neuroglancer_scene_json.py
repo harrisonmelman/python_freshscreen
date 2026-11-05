@@ -77,6 +77,7 @@ def get_contrast_from_filename(filename: str):
     # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
     # split on "_" and take the last one
     # split on "." to remove the file extension
+    _,filename = os.path.split(filename)
     return filename.split("_")[-1].split(".")[0]
 
 
@@ -491,13 +492,13 @@ def single_image_scene(data_file: str, label_precomputed_file: str, data_nhdr: d
     return data
 
 
-def write_grayscale_json(data_file: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+def write_grayscale_json(n5_filepath: str, label_precomputed_file: str, data_nhdr: dict, label_nhdr: dict, output_file: str, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
     """builds the scene for one image volume and writes it to output_file as a freshscreen display json
 
     the n5 file is expected to be in the same folder as output_file."""
-    _,data_file = os.path.split(data_file)
-    scene = single_image_scene(data_file, label_precomputed_file, data_nhdr, label_nhdr, os.path.dirname(output_file), is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
-    write_freshscreen_display_json(scene, data_file, output_file)
+    n5_dir,n5_filename = os.path.split(n5_filepath)
+    scene = single_image_scene(n5_filename, label_precomputed_file, data_nhdr, label_nhdr, n5_dir, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
+    write_freshscreen_display_json(scene, n5_filename, output_file)
 
 
 def get_crossSectionScale_factor(voxel_size):
@@ -814,25 +815,25 @@ def get_voxel_size_from_color_nhdr(color_nhdr_file):
     raise ValueError("no space directions in {}".format(color_nhdr_file))
 
 
-def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
+def process_one_image(n5_filepath: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):
     """Setup Neuroglancer scene and write the Freshscreen display JSON for one n5 file
 
-    filename = n5 filename as found on AWS S3. This file must already be uploaded to S3 to work
+    n5_file = full file path to the n5 file in local storage (within B:/freshscreen_library probably)
     output_dir = directory to write the resulting json file
-    data_nhdr_file = INPUT data nhdr file with CIVM naming
-    label_nhdr_file = INPUT label nhdr file with CIVM naming
+    data_nhdr_file = data nhdr file with freshscreen naming
+    label_nhdr_file = label nhdr file with freshscreen naming
     label_precomputed_file = filename of precomputed label file as found on AWS S3. This file must already be uploaded to s3 to work.
     """
     # these are the types of files we DO NOT want to process here
     # labels are included here because they will never be presented on their own, only as a layer with other files
-    if "label" in filename.lower():
+    if not n5_filepath or n5_filepath is None:
         return
-    if "gre" in filename.lower():
+    if "label" in os.path.basename(n5_filepath).lower():
         return
-    if not filename or filename is None:
+    if "gre" in os.path.basename(n5_filepath).lower():
         return
-    runno = get_runno_from_filename(filename)
-    contrast = get_contrast_from_filename(filename)
+    runno = get_runno_from_filename(n5_filepath)
+    contrast = get_contrast_from_filename(n5_filepath)
 
     logging.info("data nhdr file = {}".format(data_nhdr_file))
     # stash the original name away just in case it is a color, will be needed later. will not be used in non-color case
@@ -841,9 +842,8 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
         logging.info("processing COLOR file. Will use the DWI nhdr file for metadata purposes. ")
         search_dir = os.path.dirname(data_nhdr_file)
         data_nhdr_file = find_nhdr_file(runno, "dwi", local_search_dir=search_dir)
-    #breakpoint()
     data_nhdr = nrrd.read_header(data_nhdr_file)
-    if "color" in filename.lower():
+    if "color" in os.path.basename(n5_filepath).lower():
         color_vox = np.array(get_voxel_size_from_color_nhdr(color_nhdr_file))
         sd = data_nhdr["space directions"]
         data_nhdr["space directions"] = sd / np.abs(sd).max(axis=1, keepdims=True) * color_vox[:, None]
@@ -851,25 +851,17 @@ def process_one_image(filename: str, output_dir: str, data_nhdr_file: str, label
         # do we ever upload label nhdr to freshscreen? how do we distribute labels to people?
     label_nhdr = nrrd.read_header(label_nhdr_file)
 
-    output_file = pathjoin(output_dir, "{}.json".format(filename))
-    #if os.getlogin() == 'hmm56':
-    #    output_file = pathjoin(output_dir, 'hmm56_reprocessed_json', "{}.json".format(filename))
-    #logging.info("\n\nRUNNING FOR SPECIMEN:\n\t filename = {}\n\t data_nhdr_file = {}\n\t label_precomputed_file = {}\n\t label_nhdr_file = {}\n\t output_file = {}\n\n".format(filename, data_nhdr_file, label_precomputed_file, label_nhdr_file, output_file))
-
-    # check if label_precomputed_file is an absolute path or just a filename
-    # sometimes it is passed to us as B:/Freshscreen_library/xyzx_RCCF_labels.precomputed
-    # but we want to find it in s3, so all we need is the basename xyzx_RCCF_labels.precomputed
-    # confirmed that os.path.basename does nothing when given only "xyzx_RCCF_labels.precomputed", so no checks are necessary
-    print(label_precomputed_file)
+    output_file = pathjoin(output_dir, "{}.json".format(os.path.basename(n5_filepath)))
+    # in case this is passed to us as an absolute global path, we only need the basename
     label_precomputed_file = os.path.basename(label_precomputed_file)
 
     logging.info("PROCESSING FOLLOWING JOB:")
-    logging.info("\tfilename = {}".format(filename))
+    logging.info("\tfilename = {}".format(n5_filepath))
     logging.info("\tlabel_precomputed_file = {}".format(label_precomputed_file))
     logging.info("\tdata nhdr = {}".format(data_nhdr))
     logging.info("\tlabel nhdr = {}".format(label_nhdr))
     logging.info("\toutput_file = {}".format(output_file))
-    write_grayscale_json(filename, label_precomputed_file, data_nhdr, label_nhdr, output_file, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
+    write_grayscale_json(n5_filepath, label_precomputed_file, data_nhdr, label_nhdr, output_file, is_stereotaxic=is_stereotaxic, overlay_layers=overlay_layers, color_overlay=color_overlay)
 
 
 def loop_through_specimen_in_freshscreen(spec_id: str, output_dir: str, nhdr_dir: str, label_precomputed_file: str=None, contrast_list=[], is_stereotaxic=True):
