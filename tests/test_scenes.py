@@ -39,7 +39,7 @@ else:
     INPUT_DIR = f"/Users/harry/Documents/work/example_chdi_data/{GROUP}/Aligned-Data"
 
 LABEL_NHDR = f"{INPUT_DIR}/labels/RCCF/{GROUP}_RCCF_labels.nhdr"
-LABEL_PRECOMPUTED = f"{GROUP}_RCCF_labels.precomputed"
+LABEL_PRECOMPUTED = f"{GROUP}_N90_RCCF_labels.precomputed"
 DWI_N5 = f"{GROUP}_N02_dwi.n5"
 COLOR_N5 = f"{GROUP}_N07_gqi-color.n5"
 DWI_NHDR = f"{INPUT_DIR}/{GROUP}_dwi.nhdr"
