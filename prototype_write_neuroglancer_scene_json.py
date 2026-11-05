@@ -97,36 +97,11 @@ def _pick_array(node, max_voxels):
     return node[levels[-1]]
 
 
-def _sample_chunks(arr, max_voxels, rng):
-    """Read a random subset of whole chunks (cheap: each chunk is read once)."""
-    grid = [int(np.ceil(s / c)) for s, c in zip(arr.shape, arr.chunks)]
-    n_chunks = int(np.prod(grid))
-    voxels_per_chunk = int(np.prod(arr.chunks))
-    n = max(1, min(n_chunks, max_voxels // voxels_per_chunk))
-    picks = rng.choice(n_chunks, size=n, replace=False)
-
-    samples = []
-    for flat in picks:
-        idx = np.unravel_index(flat, grid)
-        sl = tuple(
-            slice(i * c, min((i + 1) * c, s))
-            for i, c, s in zip(idx, arr.chunks, arr.shape)
-        )
-        samples.append(np.asarray(arr[sl]).ravel())
-    return np.concatenate(samples)
-
-
-
-def compute_display_range(n5_path,dataset="setup0/timepoint0",max_voxels=2000000,lower_pct=0.5,upper_pct=99.5,ignore_value=0,seed=0):
+def compute_display_range(n5_path,max_voxels=2000000,lower_pct=0.5,upper_pct=99.5,ignore_value=0,seed=0):
     root = zarr.open(zarr.N5Store(n5_path), mode="r")
-    node = root[dataset] if dataset else root
+    node = root[N5_SUFFIX]
     arr = _pick_array(node, max_voxels)
-
-    rng = np.random.default_rng(seed)
-    if arr.size <= max_voxels:
-        data = np.asarray(arr[:]).ravel()
-    else:
-        data = _sample_chunks(arr, max_voxels, rng)
+    data = np.asarray(arr[:]).ravel()
 
     if np.issubdtype(data.dtype, np.floating):
         data = data[np.isfinite(data)]
@@ -590,7 +565,7 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, is_
     image_layer = {
         "type": "image",
         "source": {
-            "url": get_s3_url_from_file_basename(data_file, N5_SUFFIX),
+            "url": get_s3_url_from_file_basename(data_file),
             "transform": make_empty_transform(),
         },
         "tab": "rendering",
@@ -689,6 +664,8 @@ def write_freshscreen_display_json(data: dict, data_file: str, output_file: str,
 
     organization_json["view_neuroglancerURL"] = convert_json_to_url(convert_dict_to_string(data))
     write_dict_to_json_file(output_file, organization_json)
+    print(organization_json)
+    print(output_file)
 
 
 def pathjoin(*args):
