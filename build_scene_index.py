@@ -1,9 +1,5 @@
 """Build a single HTML page of links from a folder of display JSONs.
 
-Each display JSON holds an object_displayName and a view_neuroglancerURL. The
-links are embedded in the page, so it needs no server: open it directly, attach
-it to an email, or put it on a shared drive.
-
     python build_scene_index.py path/to/json_dir
     python build_scene_index.py path/to/json_dir -o shared/scenes.html --title "New scenes"
 """
