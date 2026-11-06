@@ -1,0 +1,336 @@
+{
+  "dimensions": {
+    "x": [
+      0.000029999999999999997,
+      "m"
+    ],
+    "y": [
+      0.000029999999999999997,
+      "m"
+    ],
+    "z": [
+      0.000029999999999999997,
+      "m"
+    ]
+  },
+  "position": [
+    8.239484786987305,
+    9.409393310546875,
+    -109.5
+  ],
+  "crossSectionScale": 0.5301050016268934,
+  "projectionOrientation": [
+    0.12048172950744629,
+    0.23542547225952148,
+    -0.11470590531826019,
+    0.9575497508049011
+  ],
+  "projectionScale": 2048,
+  "layers": [
+    {
+      "type": "image",
+      "source": {
+        "url": "n5://https://d3mof5o.s3.amazonaws.com/HETbv3000NLSAM_N09_fa.n5/setup0/timepoint0/",
+        "transform": {
+          "matrix": [
+            [
+              1,
+              0,
+              0,
+              -195.11796793137478
+            ],
+            [
+              0,
+              1,
+              0,
+              -313.98545751337525
+            ],
+            [
+              0,
+              0,
+              -1,
+              1.0124641801005394
+            ]
+          ],
+          "outputDimensions": {
+            "x": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "y": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "z": [
+              0.000029999999999999997,
+              "m"
+            ]
+          },
+          "inputDimensions": {
+            "x": [
+              0.00003502,
+              "m"
+            ],
+            "y": [
+              0.000035000000000000004,
+              "m"
+            ],
+            "z": [
+              0.000035000000000000004,
+              "m"
+            ]
+          }
+        }
+      },
+      "tab": "rendering",
+      "opacity": 1,
+      "shader": "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n#uicontrol bool invert checkbox(default=false)\n#uicontrol vec3 color color(default=\"white\")\n#uicontrol bool transparent_bg checkbox(default=false)\n\nvoid main() {\n  float x = clamp(normalized(), 0.0, 1.0);\n  if (invert) x = 1.0 - x;\n  x = pow(x, exp2(-log2_gamma));   // log2_gamma > 0 brightens, < 0 darkens\n  if (transparent_bg) {\n    emitRGBA(vec4(color * x, x));\n  } else {\n    emitRGB(color * x);\n  }\n}",
+      "shaderControls": {
+        "normalized": {
+          "range": [
+            0,
+            0.6
+          ],
+          "window": [
+            0,
+            0.7
+          ]
+        }
+      },
+      "name": "HETbv3000NLSAM fa"
+    },
+    {
+      "type": "image",
+      "source": {
+        "url": "n5://https://d3mof5o.s3.amazonaws.com/HETbv6000NLSAM_N09_fa.n5/setup0/timepoint0/",
+        "transform": {
+          "matrix": [
+            [
+              1,
+              0,
+              0,
+              -195.11796793137478
+            ],
+            [
+              0,
+              1,
+              0,
+              -313.98545751337525
+            ],
+            [
+              0,
+              0,
+              -1,
+              1.0124641801005394
+            ]
+          ],
+          "outputDimensions": {
+            "x": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "y": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "z": [
+              0.000029999999999999997,
+              "m"
+            ]
+          },
+          "inputDimensions": {
+            "x": [
+              0.00003502,
+              "m"
+            ],
+            "y": [
+              0.000035000000000000004,
+              "m"
+            ],
+            "z": [
+              0.000035000000000000004,
+              "m"
+            ]
+          }
+        }
+      },
+      "tab": "rendering",
+      "opacity": 1,
+      "shader": "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n#uicontrol bool invert checkbox(default=false)\n#uicontrol vec3 color color(default=\"white\")\n#uicontrol bool transparent_bg checkbox(default=false)\n\nvoid main() {\n  float x = clamp(normalized(), 0.0, 1.0);\n  if (invert) x = 1.0 - x;\n  x = pow(x, exp2(-log2_gamma));   // log2_gamma > 0 brightens, < 0 darkens\n  if (transparent_bg) {\n    emitRGBA(vec4(color * x, x));\n  } else {\n    emitRGB(color * x);\n  }\n}",
+      "shaderControls": {
+        "normalized": {
+          "range": [
+            4.489952246805598e-19,
+            0.6
+          ],
+          "window": [
+            1.401298464324817e-45,
+            0.7
+          ]
+        }
+      },
+      "name": "HETbv6000NLSAM fa"
+    },
+    {
+      "type": "segmentation",
+      "source": {
+        "url": "precomputed://https://d3mof5o.s3.amazonaws.com/HETbv6000NLSAM_N90_RCCF_labels.precomputed",
+        "transform": {
+          "matrix": [
+            [
+              1,
+              0,
+              0,
+              -195.11796793137478
+            ],
+            [
+              0,
+              1,
+              0,
+              -313.98545751337525
+            ],
+            [
+              0,
+              0,
+              -1,
+              1.0124641801005394
+            ]
+          ],
+          "outputDimensions": {
+            "x": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "y": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "z": [
+              0.000029999999999999997,
+              "m"
+            ]
+          },
+          "inputDimensions": {
+            "x": [
+              0.00003502,
+              "m"
+            ],
+            "y": [
+              0.000035000000000000004,
+              "m"
+            ],
+            "z": [
+              0.000035000000000000004,
+              "m"
+            ]
+          }
+        },
+        "subsources": {
+          "default": true,
+          "properties": true,
+          "mesh": true
+        },
+        "enableDefaultSubsources": false
+      },
+      "tab": "rendering",
+      "selectedAlpha": 0.3,
+      "notSelectedAlpha": 0.1,
+      "saturation": 0.2,
+      "ignoreNullVisibleSet": false,
+      "name": "HETbv6000NLSAM labels"
+    },
+    {
+      "type": "segmentation",
+      "source": {
+        "url": "precomputed://https://d3mof5o.s3.amazonaws.com/HETbv3000NLSAM_N90_RCCF_labels.precomputed",
+        "transform": {
+          "matrix": [
+            [
+              1,
+              0,
+              0,
+              -195.11796793137478
+            ],
+            [
+              0,
+              1,
+              0,
+              -313.98545751337525
+            ],
+            [
+              0,
+              0,
+              -1,
+              1.0124641801005394
+            ]
+          ],
+          "outputDimensions": {
+            "x": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "y": [
+              0.000029999999999999997,
+              "m"
+            ],
+            "z": [
+              0.000029999999999999997,
+              "m"
+            ]
+          },
+          "inputDimensions": {
+            "x": [
+              0.00003502,
+              "m"
+            ],
+            "y": [
+              0.000035000000000000004,
+              "m"
+            ],
+            "z": [
+              0.000035000000000000004,
+              "m"
+            ]
+          }
+        },
+        "subsources": {
+          "default": true,
+          "properties": true,
+          "mesh": true
+        },
+        "enableDefaultSubsources": false
+      },
+      "tab": "rendering",
+      "selectedAlpha": 0.3,
+      "notSelectedAlpha": 0.1,
+      "saturation": 0.2,
+      "ignoreNullVisibleSet": false,
+      "name": "HETbv3000NLSAM labels"
+    }
+  ],
+  "selectedLayer": {
+    "size": 449,
+    "layer": "HETbv6000NLSAM labels"
+  },
+  "layout": {
+    "type": "row",
+    "children": [
+      {
+        "type": "viewer",
+        "layers": [
+          "HETbv3000NLSAM fa",
+          "HETbv3000NLSAM labels"
+        ],
+        "layout": "xy"
+      },
+      {
+        "type": "viewer",
+        "layers": [
+          "HETbv6000NLSAM fa",
+          "HETbv6000NLSAM labels"
+        ],
+        "layout": "xy"
+      }
+    ]
+  }
+}
