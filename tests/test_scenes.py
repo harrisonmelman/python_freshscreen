@@ -46,10 +46,10 @@ DWI_NHDR = f"{INPUT_DIR}/{GROUP}_dwi.nhdr"
 COLOR_NHDR = f"{INPUT_DIR}/{GROUP}_gqi_color.nhdr"
 
 CASES = {
-    "dwi": dict(filename=DWI_N5, data_nhdr_file=DWI_NHDR, is_stereotaxic=True),
-    "gqi_color": dict(filename=COLOR_N5, data_nhdr_file=COLOR_NHDR, is_stereotaxic=True),
+    "dwi": dict(n5_filepath=f"{FS_LIBRARY}/{DWI_N5}", data_nhdr_file=DWI_NHDR, is_stereotaxic=True),
+    "gqi_color": dict(n5_filepath=f"{FS_LIBRARY}/{COLOR_N5}", data_nhdr_file=COLOR_NHDR, is_stereotaxic=True),
     "dwi_with_overlay": dict(
-        filename=DWI_N5,
+        n5_filepath=f"{FS_LIBRARY}/{DWI_N5}",
         data_nhdr_file=DWI_NHDR,
         is_stereotaxic=False,
         color_overlay="green",
