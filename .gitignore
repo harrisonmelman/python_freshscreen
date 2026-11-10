@@ -8,3 +8,6 @@ __pycache__/
 # Scratch output from the rclone file listing
 data/temp/*
 !data/temp/.gitkeep
+
+# Generated scene link page
+scene_index.html
