@@ -1,392 +1,35 @@
-# docstring convention example:
-# like git commit rules. one line short description, skip a line, then more descriptive
-#def complex(real=0.0, imag=0.0):
-"""Form a complex number.
+"""Scene building and S3 lookups that have not moved into the freshscreen package yet.
 
-    Keyword arguments:
-    real -- the real part (default 0.0)
-    imag -- the imaginary part (default 0.0)
-    """
-
-# IMPORTS
-from typing import OrderedDict
-import urllib.parse
-import json
+The helpers this module used to define now live in freshscreen/ and are re-exported
+here, so existing callers (prepare1image.py, make_displayJSON.py, the tests) keep working.
+"""
+import glob
 import logging
 import os
-import re
+import subprocess
 import sys
+
 import nrrd
 import numpy as np
-import functools
-import glob
-import subprocess
-import csv
-import re
-import zarr
 
-# GLOBAL VARIABLES -- caps-locking these to make it obvious they are global and BAD
-# needed at the beginning of all aws s3 filepaths. holds the file protocol and s3 bucket information
-# example usage:
-    # n5_filepath="{}/{}/{}.format(N5_PREFIX, filename, N5_SUFFIX)"
-    # precomputed_filepath="{}/{}.format(PRECOMPUTED_PREFIX, filename)"
-#N5_PREFIX = "n5://https://d3mof5o.s3.amazonaws.com"
-#PRECOMPUTED_PREFIX = "precomputed://https://d3mof5o.s3.amazonaws.com"
-N5_PREFIX = "n5://https://fast-s3.oit.duke.edu/freshscreen/dh-civm-public"
-PRECOMPUTED_PREFIX = "precomputed://https://fast-s3.oit.duke.edu/freshscreen/dh-civm-public"
-# this is needed at the end of all N5 file paths, to tell neuroglancer where the data lives in the folder struct
-N5_SUFFIX="setup0/timepoint0/"
-LIGHTSHEET_CONTRASTS = ["NeuN", "autof", "Thy1", "MBP", "ChAT"]
-RCLONE = "K:/DevApps/rclone-v1.58.1-windows-amd64/rclone.exe"
-
-# a class to allow json to encode assorted numpy data types
-class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, np.bool_):
-            return bool(obj)
-        return super(NpEncoder, self).default(obj)
-def get_fsname_from_fsfile(filename: str):
-    _, filename = os.path.split(filename)
-    match = re.match(r'(.+?)(_M4D)?\.(.+)', filename)
-
-# TODO: this needs to be refactored or reconsidered
-def get_runno_from_filename(filename: str):
-    _,filename = os.path.split(filename)
-    f = filename.split("_")
-    print(f)
-    # run number should always be the second to last field in the freshscreen name
-    guess = f[-2]
-    # matching criteria are it starts with N or S AND is length 6 (N12345) or length 11 (N12345NLSAM)
-    if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
-        return guess
-    # if for whatever reason this does not match as a runnumber, loop through the others to see if you can find it
-    for guess in f:
-        if guess is not None and guess[0] in "NS" and len(guess) in [6,11]:
-            return guess
-    logging.warning("unable to find specimen run number from the filename: {}\n\t Will attempt to treat it as an atlas dataset. Setting runno to: {}".format(filename, f[0]))
-    return f[0]
-
-
-def get_contrast_from_filename(filename: str):
-    # in freshscren, all filenames look similar (${spec_id}_${number}_${runno}_${contrast}.n5)
-    # split on "_" and take the last one
-    # split on "." to remove the file extension
-    _,filename = os.path.split(filename)
-    return filename.split("_")[-1].split(".")[0]
-
-
-def _pick_array(node, max_voxels):
-    """Return an array to sample: the node itself, or the best pyramid level in a group."""
-    if isinstance(node, zarr.Array):
-        return node
-    levels = sorted(
-        (k for k in node.array_keys() if re.fullmatch(r"s\d+", k)),
-        key=lambda k: int(k[1:]),
-    )
-    if not levels:
-        raise ValueError(f"No array or s0/s1/... pyramid levels found in {node.name!r}")
-    # Finest level that fits the voxel budget; otherwise the coarsest available
-    for k in levels:
-        if node[k].size <= max_voxels:
-            return node[k]
-    return node[levels[-1]]
-
-
-def compute_display_range(n5_path,max_voxels=2000000,lower_pct=0.5,upper_pct=99.5,ignore_value=0,seed=0):
-    root = zarr.open(zarr.N5Store(n5_path), mode="r")
-    node = root[N5_SUFFIX]
-    arr = _pick_array(node, max_voxels)
-    data = np.asarray(arr[:]).ravel()
-
-    if np.issubdtype(data.dtype, np.floating):
-        data = data[np.isfinite(data)]
-    if ignore_value is not None:
-        data = data[data != ignore_value]
-
-    if data.size == 0:
-        # Nothing usable sampled: fall back to the dtype's natural range
-        if np.issubdtype(arr.dtype, np.integer):
-            info = np.iinfo(arr.dtype)
-            return {"range": [float(info.min), float(info.max)],
-                    "window": [float(info.min), float(info.max)]}
-        return {"range": [0.0, 1.0], "window": [0.0, 1.0]}
-
-    lo, hi = np.percentile(data, [lower_pct, upper_pct])
-    if hi <= lo:  # constant data
-        hi = lo + 1
-    return {
-        "range": [float(lo), float(hi)],
-        "window": [float(min(data.min(), lo)), float(max(data.max(), hi))],
-    }
-
-
-def get_default_threshold(filename: str):
-    """from filename, figure out which type of contrast it is, and return the appropriate threshold value from the dictionary
-
-    Completely dependendent on current (11/7/2022) freshscreen filenames"""
-    DEFAULT_THRESHOLDS = {
-        "dwi" : (0,25000),
-        "fa" : (0,1),
-        "nqa": (0,1),
-        "ad" : (0,0.8),
-        "rd" : (0,0.8),
-        "md" : (0,0.8),
-        "qa" : (0,1),
-        "gfa" : (0,1),
-        "color" : (0,128),
-        "NeuN" : (0,1500),
-        "MBP" : (0,1300),
-        "MOG" : (0,2500),
-        "PDE10A" : (0,2000),
-        "autof" : (0,1200),
-        "SST" : (0,1000),
-        "mHTT" : (0,6000),
-        "NFH" : (0,2000),
-        "NPY" : (0,1200),
-        "Thy1" : (0,4000),
-        "IBA1" : (0,1300),
-        "Syto16" : (0,12000),
-        "tdi" : (0,20),
-        "tdi3" : (0,20),
-        "tdi5" : (0,20),
-        "m0" : (0,70000),
-        "m1" : (0,45000),
-        "m2" : (0,25000),
-        "m3" : (0,15000),
-        "b0" : (0,30000),
-        "annotation" : (0,100),
-        "average-template" : (0,100),
-        "ara-nissl" : (0,100),
-        "nqa-color" : (0,100),
-        "gqi-color" : (0,100),
-        "tdi-color" : (0,100),
-        "tdi5um-color" : (0,100),
-        "tdi3-color" : (0,100)
-    }
-    # no idea if this will work as expected or not...
-    d17gaj40_THRESHOLDS = {
-        "dwi" : (0,5000),
-        "fa" : (0,1),
-        "lc" : (0,1),
-        "ad" : (0,0.0009),
-        "rd" : (0,0.0005),
-        "md" : (0,0.0006),
-        "color" : (0,128),
-        "tdi" : (0,20),
-        "tdi3" : (0,20),
-        "tdi5" : (0,20),
-        "b0" : (0,15000),
-        "nqa-color" : (0,100),
-        "gqi-color" : (0,100),
-        "tdi-color" : (0,100),
-        "tdi3-color" : (0,100)
-    }
-    contrast = get_contrast_from_filename(filename)
-    if contrast in DEFAULT_THRESHOLDS:
-        return DEFAULT_THRESHOLDS[contrast]
-    else:
-        print("WARNING: contrast unknown. using default contrast boundaries of (0,1)")
-        return (0,1)
-    #return d17gaj40_THRESHOLDS[contrast]
-
-
-
-def get_default_color_overlay(filename):
-    contrast = get_contrast_from_filename(filename)
-    defaults = {
-        "NeuN" : "green",
-        "MBP" : "red",
-        "PDE10A": "cyan",
-        "mHTT": "yellow"
-    }
-    if contrast in defaults:
-        return defaults[contrast]
-    else:
-        print("WARNING: contrast unknown. using default color of grayscale")
-        return "white"
-
-
-def convert_dict_to_string(data: dict):
-    return json.dumps(data, ensure_ascii=False, cls=NpEncoder)
-
-
-def write_dict_to_json_file(file: str, data: dict):
-    """converts a dict to json format and writes it to the file path provided
-    WILL OVERWRITE any existing file at that location"""
-    output_dir = os.path.dirname(file)
-    if not os.path.isdir(output_dir):
-        os.makedirs(output_dir)
-    with open(file, 'w') as f:
-        # i THINK that ensure_ascii=False is analogous to python2's encoding='utf-8'
-        # json cannot handle numpy data types so i must define my own encoder
-        # TODO: encoder stolen from stack overflow. ensure that it works
-        # dump writes to file. dumps writes to a string.
-        # any other differences? idk
-        json.dump(data, f, ensure_ascii=False, cls=NpEncoder)
-
-
-def convert_json_to_url(file: str):
-    """file is the path to a json file that contains scene information for neuroglancer
-    Returns a shareable neuroglancer link: "neuroglancer.freshscreen.com/#!{}".format(encoded_json)
-
-    you can also pass a JSON in string format and it will handle that instead. this function can tell if it is a filepath or a json string"""
-
-    encoded_text = ""
-    # might be more accurate to check if the first character is {, but that leaves room for extra whitespace to break me
-    if "{" in file:
-        # then we have a JSON string, not a file to read from
-        # below line breaks it bc it removes ALL spaces in the json
-            # this is fine for most things (i.e. going from "name" : "fa" to "name":"fa")
-            # but it breaks the internal code block that handles rendering. (i.e. "#uicontrol invlerp normalized(range=[0,1])" is NOT the same as "#uicontrolinvlerpnormalized(range=[0,1])" )
-        #encoded_text = urllib.parse.quote("".join(file.split()))
-        encoded_text = urllib.parse.quote(file)
-    else:
-        with open(file) as f:
-            # TODO: check if the "no spaces" failure also happens when reading and encoding from a json file
-            # the reason i did this originally was bc neuroglancer gave a "url too long" error
-            encoded_text = urllib.parse.quote("".join(f.read().split()))
-    # missing a "#!" at beggining
-    url = "https://neuroglancer.freshscreen.com/#!{}".format(encoded_text)
-    logging.info("\n\n{}".format(url))
-    return url
-
-
-def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
-    """Determines the voxel size (in meters) of an image given the nhdr file as an OrderedDict (already read into an object by nrrd.read_nhdr)
-    does not assume isotropic volumes. returns the voxel size of each dimension as an array"""
-    nhdr["space directions"]
-    sizes = []
-    n_dims = nhdr["space directions"].shape[0]
-    # hard-coding in three here to "destroy" the 4th dimension (3) in color files
-    for i in range(3):
-    #for i in range(n_dims):
-        size = max(abs(nhdr["space directions"][i]))
-        # conversion from mm to m
-        size = size / 1000
-        sizes.append(size)
-    return sizes
-
-
-def get_s3_url_from_file_basename(filename: str):
-    """given a file basename (e.g. 200316-1-1_N10_N58204NLSAM_fa.n5), return the full url (in neuroglancer format) of that file on the d3mof5o s3 bucket
-
-    This function determines if the file is of type n5 or precomputed, and builds the path accordingly"""
-    # TODO: add an argument to make this work for arbitrary s3 buckets
-    # TODO: test to ensure that os.path.join always does the right job here. PROBABLY fails on windows
-    suffix = filename.split(".")[-1]
-    if "n5" in suffix:
-        return pathjoin(N5_PREFIX, filename, N5_SUFFIX)
-    elif "precomputed" in suffix:
-        return pathjoin(PRECOMPUTED_PREFIX, filename)
-    else:
-        logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
-        return None
-
-
-def update_matrix_transform(xform_matrix: dict, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=True):
-    # update the transform matrix with what is in the nhdr -- 3x4 in neuroglancer. includes 3x3 rotation matrix and 3x1 translation vector
-    # this SHOULD always be 3x3, but no point risking it
-    # flatten array so it can be used inside of a lambda easily
-    # divide by its own absolute value, so it preserves its sign but scales it to 1
-    # convert back to a np array, convert it to int, and reshape it back to 3x3
-    data_nhdr_matrix = nhdr_dict["space directions"]
-    temp_shape = data_nhdr_matrix.shape
-    data_nhdr_matrix = list(map(lambda x: x / abs(x) if x != 0 else 0, data_nhdr_matrix.flatten()))
-    data_nhdr_matrix = np.asarray(data_nhdr_matrix, dtype=int).reshape(temp_shape)
-
-    # TODO: vectorize?
-    for i in range(data_nhdr_matrix.shape[0]):
-        for j in range(data_nhdr_matrix.shape[1]):
-            xform_matrix[i][j] = data_nhdr_matrix[i][j]
-
-    # translation transform part
-    # should retain the signs. just divide by the voxel size (of MRI -- so divide by 0.015 even for lightsheet)
-    # label_voxel_sizes are in METERS. data_nhdr["space origin"] are in MM. so divide by an extra 1000
-    for i in range(len(label_voxel_sizes)):
-        # iterating over the last column
-        temp = nhdr_dict["space origin"][i] / label_voxel_sizes[i] / 1000
-        xform_matrix[i][-1] = temp
-
-    # ABOVE NO LONGER CORRECT FOR DMBA DATA
-    # this puts the volume origin at the center of the neuroglancer scene. appropriate for symmetric15um-aligned data
-    # NOT appropriate for DMBA aligned data, because it puts Bregma at the center of the neyuroglancer scene
-    # IF your data is aligned with DMBA, then you need to factor in a specific translation offset. This will instead put the center of the anterior Commissure at the center of the neuroglancer scene. this more or less matches previous functionality
-    # 0.005199037941243297,0.004563725401255936,-4.169626074596984 (in mm)
-    if is_stereotaxic:
-        DMBA_offset_correction=[0.005199037941243297,0.004563725401255936,-4.169626074596984]
-        print(xform_matrix);
-        for i in range(len(DMBA_offset_correction)):
-            xform_matrix[i][-1] = xform_matrix[i][-1] - ( DMBA_offset_correction[i] / label_voxel_sizes[i] / 1000)
-
-# a "fix" to make sure the coronal view in neuroglacner is right side up
-def flip_xform_dimension(xform_matrix: dict):
-    image_matrix_numpy_array = np.asarray(xform_matrix)
-    flip_row_index = np.argmax(image_matrix_numpy_array[:,2] != 0)
-    # flip sign of each value in the found row
-    for i in range(len(xform_matrix[flip_row_index])):
-        xform_matrix[flip_row_index][i] = -1 * xform_matrix[flip_row_index][i]
-
-
-# helper function for convert_lut_file
-def rgba_to_hex(r, g, b, a):
-    r=int(float(r))
-    g=int(float(g))
-    b=int(float(b))
-    a=int(float(a))
-    # :02x means "2 digits, lowercase hex" (use :02X for uppercase)
-    return f"#{r:02x}{g:02x}{b:02x}{a:02x}"
-
-
-# reads a CIVM complex stats lookup table and converts it to a neuroglancer compatible lut
-# returns a dict with key=ROI number as a string, value=color in hex
-def convert_lut_file(label_lut_file):
-    roi_dict = {}
-    with open(label_lut_file, 'r') as file:
-        # resolve header fields
-        # Done this way to safely have 'ROI' as the key field instead of '# ROI'
-        original_reader = csv.reader(file,delimiter='\t')
-        original_headers = next(original_reader)
-
-        # strip whitespace and replace "# ROI" with "ROI"
-        cleaned_headers = [h.strip().replace('# ROI', 'ROI') for h in original_headers]
-
-        # Skip the comment row
-        next(file)
-
-        # use dict reader with cleaned headers
-        reader = csv.DictReader(file, fieldnames=cleaned_headers, delimiter='\t')
-
-        # Now iterate as normal
-        for row in reader:
-            roi = row['ROI']
-            if 'NaN' in roi:
-                # TODO: i don't love this conditional. is it safe??
-                continue
-            hex_color = rgba_to_hex(row['c_r'],row['c_g'],row['c_b'],row['c_a'])
-            roi_dict[roi] = hex_color
-    return roi_dict
-
-
-def load_segment_colors(label_type: str="RCCF"):
-    """returns the dict of label ROI number -> hex color stored in data/segment_colors/{label_type}.json"""
-    code_dir = os.path.dirname(os.path.realpath(__file__))
-    with open(pathjoin(code_dir, "data", "segment_colors", "{}.json".format(label_type))) as f:
-        return json.load(f)
-
-
-def make_empty_transform():
-    """returns a neuroglancer source transform for update_dimensions and update_matrix_transform to fill in"""
-    return {
-        "matrix": [[0, 0, 0, 0] for _ in range(3)],
-        "inputDimensions": {axis: [0, "m"] for axis in "xyz"},
-        "outputDimensions": {axis: [0, "m"] for axis in "xyz"},
-    }
+from freshscreen.config import (  # noqa: F401  (re-exported)
+    LIGHTSHEET_CONTRASTS, N5_PREFIX, N5_SUFFIX, PRECOMPUTED_PREFIX, RCLONE,
+)
+from freshscreen.contrasts import get_default_color_overlay, get_default_threshold  # noqa: F401
+from freshscreen.display_range import _pick_array, compute_display_range  # noqa: F401
+from freshscreen.geometry import (  # noqa: F401
+    flip_xform_dimension, get_crossSectionScale_factor, get_voxel_size_from_color_nhdr,
+    get_voxel_size_from_nhdr_dict, make_empty_transform, update_dimensions, update_matrix_transform,
+)
+from freshscreen.luts import convert_lut_file, load_segment_colors, rgba_to_hex  # noqa: F401
+from freshscreen.naming import (  # noqa: F401
+    get_contrast_from_filename, get_runno_from_filename, get_s3_url_from_file_basename, pathjoin,
+)
+from freshscreen.output import (  # noqa: F401
+    NpEncoder, convert_dict_to_string, convert_json_to_url, write_dict_to_json_file,
+    write_freshscreen_display_json,
+)
+from freshscreen.shaders import RGB_SHADER, grayscale_shader
 
 
 def make_scene(layers: list, voxel_sizes: list, cross_section_scale: float):
@@ -501,35 +144,6 @@ def write_grayscale_json(n5_filepath: str, label_precomputed_file: str, data_nhd
     write_freshscreen_display_json(scene, n5_filename, output_file)
 
 
-def get_crossSectionScale_factor(voxel_size):
-    # crossSectionScale is a "global" variable to each neuroglancer scene
-    # determines how zoomed in it is
-        # found 2 works well for 15um data
-        # 0.6 works well for 45um
-        # remember that neuroglancer assumes nanometers, so that is why the vox size comparison is so wild
-    eps=1e-15
-    scale_factor = 2
-    if abs(abs(voxel_size) - 0.000015) < eps:
-        scale_factor = 2
-    if abs(abs(voxel_size) - 0.000045) < eps:
-        scale_factor = 0.8
-    logging.info("setting scale factor to: {}".format(scale_factor))
-    return scale_factor
-
-
-def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str, job_id: str=""):
-    if dimension_field not in ["inputDimensions", "outputDimensions"]:
-        logging.warning("unrecognized dimension field: {}\nCan not write. Only allowed options are: 'inputDimensions' and 'outputDimensions'".format(dimension_field))
-        return
-
-    # set inputDimensions to nhdr_voxel_size / 1000 (nhdr is in mm, json is in m)
-    i = 0
-    for key in data_layer["source"]["transform"][dimension_field].keys():
-        data_layer["source"]["transform"][dimension_field][key][0] = voxel_sizes[i]
-        i+=1
-    logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
-
-
 def setup_rccf_label_layer(label_precomputed_file: str, label_nhdr: str, is_stereotaxic=True):
     rccf_label_layer = {
         "type": "segmentation",
@@ -602,77 +216,15 @@ def setup_one_image_layer(data_file: str, data_nhdr: dict, label_nhdr: dict, is_
         color_overlay = get_default_color_overlay(data_file)
     if "color" not in data_file:
         image_layer["shaderControls"] = {"normalized": display_range}
-        image_layer["shader"] = (
-            "#uicontrol invlerp normalized(range=[0, 0.8], clamp=true)\n"
-            "#uicontrol float log2_gamma slider(min=-2, max=2, default=0, step=0.05)\n"
-            "#uicontrol bool invert checkbox(default=false)\n"
-            f"#uicontrol vec3 color color(default=\"{color_overlay}\")\n"
-            "#uicontrol bool transparent_bg checkbox(default=false)\n\n"
-            "void main() {\n"
-            "  float x = clamp(normalized(), 0.0, 1.0);\n"
-            "  if (invert) x = 1.0 - x;\n"
-            "  x = pow(x, exp2(-log2_gamma));   // log2_gamma > 0 brightens, < 0 darkens\n"
-            "  if (transparent_bg) {\n"
-            "    emitRGBA(vec4(color * x, x));\n"
-            "  } else {\n"
-            "    emitRGB(color * x);\n"
-            "  }\n"
-            "}"
-        )
+        image_layer["shader"] = grayscale_shader(color_overlay)
     else:
         image_layer["shaderControls"] = {"black": display_range["range"][0]/255}
         image_layer["shaderControls"] = {"white": display_range["range"][1]/255}
-        image_layer["shader"] = (
-    """
-    #uicontrol float black slider(min=0, max=1, default=0)
-    #uicontrol float white slider(min=0, max=1, default=1)
-    #uicontrol float gamma slider(min=0.2, max=3, default=1)
-    #uicontrol float saturation slider(min=0, max=3, default=1)
-    #uicontrol float opacity slider(min=0, max=1, default=1)
-    void main() {
-    vec3 rgb = vec3(toNormalized(getDataValue(0)),
-                    toNormalized(getDataValue(1)),
-                    toNormalized(getDataValue(2)));
-    rgb = clamp((rgb - black) / max(white - black, 1e-6), 0.0, 1.0);
-    rgb = pow(rgb, vec3(1.0 / gamma));
-    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-    rgb = clamp(mix(vec3(lum), rgb, saturation), 0.0, 1.0);
-    emitRGBA(vec4(rgb, opacity));
-    }"""
-        )
+        image_layer["shader"] = RGB_SHADER
     update_matrix_transform(image_layer["source"]["transform"]["matrix"], data_nhdr, label_voxel_sizes, is_stereotaxic)
     flip_xform_dimension(image_layer["source"]["transform"]["matrix"])
 
     return image_layer
-
-
-# also take in the data_file name because it is available to pass, and it is "obfuscated" within the data dict by the N5_PREFIX/PRECOMPUTED_PREFIX
-def write_freshscreen_display_json(data: dict, data_file: str, output_file: str, display_name: str=None):
-    """given the dict created earlier, generate the json file for freshscreen
-    three keys:
-        - filename in freshscreen s3
-        - display name
-        - neuroglancer url
-
-    create a dict, convert to json, write to file"""
-    organization_json = dict()
-    organization_json["object_Name"] = data_file
-    # if user does not specify, then look to see what I named this layer in neuroglancer and use that
-    if display_name is None:
-        organization_json["object_displayName"] = data["layers"][0]["name"]
-    else:
-        organization_json["object_displayName"] = display_name
-
-    organization_json["view_neuroglancerURL"] = convert_json_to_url(convert_dict_to_string(data))
-    write_dict_to_json_file(output_file, organization_json)
-    print(organization_json)
-    print(output_file)
-
-
-def pathjoin(*args):
-    """takes a list of path components and joins them together with forward slashes as the separator
-    this is easier than doing it inline because using *args automatically turns all of your input arguments into a single tuple (so you don't have to wrap your arguments to "/".join() into a list)"""
-    return "/".join(args)
 
 
 def find_nhdr_file(n5_file: str):
@@ -802,17 +354,6 @@ def get_file_list_from_freshscreen(spec_id_fresh: str, contrast_list: list=[]):
 
     filelist = a.stdout.decode("utf-8").split("\n")
     return filelist
-
-
-def get_voxel_size_from_color_nhdr(color_nhdr_file):
-    """voxel size (mm) of the 3 spatial axes, read straight from the header text.
-    pynrrd can't read LIST color headers, and the 'none' channel axis can be first or last."""
-    with open(color_nhdr_file) as f:
-        for line in f:
-            if line.startswith('space directions:'):
-                vecs = re.findall(r'\(([^)]*)\)', line)
-                return [max(abs(float(v)) for v in vec.split(',')) for vec in vecs]
-    raise ValueError("no space directions in {}".format(color_nhdr_file))
 
 
 def process_one_image(n5_filepath: str, output_dir: str, data_nhdr_file: str, label_nhdr_file: str, label_precomputed_file: str=None, is_stereotaxic=True, overlay_layers=[], color_overlay: str="white"):

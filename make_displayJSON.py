@@ -1,5 +1,5 @@
 # given a neuroglancer JSON (what you paste into the {} dialogue box within neuroglancer) and a displayName, create a freshscreen display JSON file
-from prototype_write_neuroglancer_scene_json import write_freshscreen_display_json
+from freshscreen.output import write_freshscreen_display_json
 import json
 import sys
 import os
