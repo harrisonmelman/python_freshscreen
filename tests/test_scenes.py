@@ -51,7 +51,7 @@ CASES = {
     "dwi_with_overlay": dict(
         n5_filepath=f"{FS_LIBRARY}/{DWI_N5}",
         data_nhdr_file=DWI_NHDR,
-        is_stereotaxic=False,
+        is_stereotaxic=True,
         color_overlay="green",
         overlay_layers=[f"{TESTS_DIR}/fixtures/AD_change_lookup.txt"],
     ),
