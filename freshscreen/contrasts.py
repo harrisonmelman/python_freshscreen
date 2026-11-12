@@ -1,5 +1,6 @@
 """Per-contrast display defaults."""
 from .naming import get_contrast_from_filename
+import logging
 
 DEFAULT_THRESHOLDS = {
     "dwi": (0, 25000),
@@ -84,5 +85,7 @@ def get_default_color_overlay(filename):
     contrast = get_contrast_from_filename(filename)
     if contrast in DEFAULT_OVERLAY_COLORS:
         return DEFAULT_OVERLAY_COLORS[contrast]
-    print("WARNING: contrast unknown. using default color of grayscale")
+    if "color" in filename:
+        return None
+    logging.info("Unknown contrast. using default color of grayscale")
     return "white"

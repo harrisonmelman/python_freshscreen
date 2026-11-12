@@ -5,6 +5,7 @@ Atlas and group-average datasets have no runno, e.g. 15mo-WT-M_N02_dwi.n5
 """
 import logging
 import os
+import re
 
 from .config import N5_PREFIX, N5_SUFFIX, PRECOMPUTED_PREFIX
 
@@ -51,3 +52,12 @@ def get_s3_url_from_file_basename(filename: str):
     else:
         logging.warning("ERROR: file does not seem to be in n5 or precomputed format")
         return None
+
+
+# somewhat specialized to CHDI, will return None if irrelevant
+def get_age_from_group(group: str):
+    age = None
+    m = re.match(r"(\d+mo)-", group)
+    if m:
+        age = m.group(1)
+    return age

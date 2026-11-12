@@ -4,7 +4,7 @@ Neuroglancer works in meters; nhdr headers are in millimeters.
 """
 import logging
 import re
-from typing import OrderedDict
+from .dataset import Dataset
 
 import numpy as np
 
@@ -13,7 +13,8 @@ import numpy as np
 DMBA_OFFSET_CORRECTION = [0.005199037941243297, 0.004563725401255936, -4.169626074596984]
 
 
-def get_voxel_size_from_nhdr_dict(nhdr: OrderedDict):
+# this was OrderedDict. is that necessary?
+def get_voxel_size_from_nhdr_dict(nhdr: dict):
     """voxel size (in meters) of each spatial dimension, from a header read by nrrd.read_header
 
     Does not assume isotropic volumes. Only the first 3 dimensions are used, which drops the channel axis of color files."""
@@ -37,6 +38,13 @@ def get_voxel_size_from_color_nhdr(color_nhdr_file):
     raise ValueError("no space directions in {}".format(color_nhdr_file))
 
 
+def source_transform(space_directions, space_origin, input_voxel_size, output_voxel_size, is_stereotaxic=True) -> dict:
+    """Wrapper/consolidation for all 4 steps of creating a transform
+    Previously: make_empty_transform, update_dimensions, update_matrix_transform, flip_xform_dimension
+    input_voxel_size comes from the data volume; output_voxel_sizecomes from the label volume"""
+    pass
+
+
 def make_empty_transform():
     """returns a neuroglancer source transform for update_dimensions and update_matrix_transform to fill in"""
     return {
@@ -58,12 +66,12 @@ def update_dimensions(data_layer: dict, voxel_sizes: list, dimension_field: str,
     logging.info("updated {} {} to: {}".format(job_id, dimension_field, data_layer["source"]["transform"][dimension_field]))
 
 
-def update_matrix_transform(xform_matrix: list, nhdr_dict: dict, label_voxel_sizes: list, is_stereotaxic=True):
+def update_matrix_transform(xform_matrix: list, ds: Dataset, label_voxel_sizes: list, is_stereotaxic=True):
     """fills in a 3x4 neuroglancer transform (3x3 rotation + translation column) from the nhdr, in place
 
     The rotation is the sign of each nhdr space direction. The translation is the
     nhdr origin in label voxels (so divide by the MRI voxel size even for lightsheet)."""
-    data_nhdr_matrix = nhdr_dict["space directions"]
+    data_nhdr_matrix = np.array(ds.space_directions)
     temp_shape = data_nhdr_matrix.shape
     data_nhdr_matrix = list(map(lambda x: x / abs(x) if x != 0 else 0, data_nhdr_matrix.flatten()))
     data_nhdr_matrix = np.asarray(data_nhdr_matrix, dtype=int).reshape(temp_shape)
@@ -74,7 +82,7 @@ def update_matrix_transform(xform_matrix: list, nhdr_dict: dict, label_voxel_siz
 
     # label_voxel_sizes are in METERS. data_nhdr["space origin"] are in MM. so divide by an extra 1000
     for i in range(len(label_voxel_sizes)):
-        temp = nhdr_dict["space origin"][i] / label_voxel_sizes[i] / 1000
+        temp = ds.space_origin[i] / label_voxel_sizes[i] / 1000
         xform_matrix[i][-1] = temp
 
     # Without a correction the volume origin lands at the scene center, which is right for

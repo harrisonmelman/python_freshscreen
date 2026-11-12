@@ -2,11 +2,7 @@
 import csv
 import json
 import os
-
-# repo root: freshscreen/ sits directly under it
-REPO_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-SEGMENT_COLORS_DIR = os.path.join(REPO_DIR, "data", "segment_colors")
-
+from .config import SEGMENT_COLORS_DIR
 
 def rgba_to_hex(r, g, b, a):
     r = int(float(r))
